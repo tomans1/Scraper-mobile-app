@@ -167,9 +167,6 @@ export function FiltersDrawer({
 
           <View style={styles.section}>
             <Text style={styles.label}>Dátum pridania inzerátu</Text>
-            <Text style={styles.helperText}>
-              Vyberte dátumy z kalendára a označte rozsah, ktorý chcete použiť.
-            </Text>
             <View style={styles.dateInputsRow}>
               <View style={styles.dateInputGroup}>
                 <Text style={styles.dateInputLabel}>Od</Text>
