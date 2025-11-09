@@ -1,4 +1,4 @@
-const API_BASE = 'https://web-production-ec52.up.railway.app';
+export const API_BASE = 'https://web-production-ec52.up.railway.app';
 
 export async function apiRequest(path, options = {}) {
   const url = `${API_BASE}${path}`;
@@ -14,7 +14,6 @@ export async function apiRequest(path, options = {}) {
   const response = await fetch(url, {
     ...options,
     headers,
-    credentials: 'include',
   });
 
   if (!response.ok) {
