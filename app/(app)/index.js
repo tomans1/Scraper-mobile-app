@@ -160,11 +160,11 @@ export default function HomeScreen() {
         : totalValue;
 
       const stageLabels = {
-        '1/5 – Zbieram sitemapy': '1/5 – Zbieram sitemapy',
-        '2/5 – Prvé filtrovanie': '2/5 – Prvé filtrovanie',
-        '3/5 – HTML filtrácia': '3/5 – HTML filtrácia',
-        '4/5 – Filtrovanie podľa popisu': '4/5 – Filtrovanie podľa popisu',
-        '5/5 – Finálne filtrovanie': '5/5 – Finálne filtrovanie',
+        '1/5 Zber sitemap': 'Zber sitemap',
+        '2/5 Prvé filtrovanie': 'Prvé filtrovanie',
+        '3/5 Sťahovanie inzerátov': 'Sťahovanie inzerátov',
+        '4/5 Filtrovanie popisov': 'Filtrovanie popisov',
+        '5/5 OpenAI filtrovanie': 'OpenAI filtrovanie',
       };
 
       const jobStartedAt = job.started_at || null;
