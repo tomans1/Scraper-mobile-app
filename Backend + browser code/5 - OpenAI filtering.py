@@ -51,13 +51,18 @@ def batch_blocks(blocks, n):
 
 def build_prompt(batch):
     intro = (
-        "You are a Slovak real estate classifier. You are given classified ads. "
-        "If an ad seems like it's posted by a real estate agency, or is about renting, foreign property, commercial property, "
-        "or anything other than a private sale, return its result number and reason.\n\n"
-        "Respond only with removed ads in this format:\n"
-        "#123 AGENCY: keyword1, keyword2\n"
-        "#456 RENTAL: keyword3, keyword4\n\n"
-        "If the ad is a private seller listing a property for sale, ignore it.\n\nAds:\n---\n"
+    "You are a Slovak real estate ad classifier. Each ad below represents one listing.\n"
+    "Your goal is to find and list ONLY the ads that should be REMOVED — because they are clearly not private property sales.\n\n"
+    "Remove the ad if ANY of the following apply:\n"
+    "- Posted by a real estate agency or broker (look for company forms like s.r.o., reality, maklér, agentúra, kancelária, etc.)\n"
+    "- The ad is for RENT, LEASE, or similar (prenájom, nájom, mesačne, deposit, etc.)\n"
+    "- It is foreign property (outside Slovakia)\n"
+    "- It is anything other than a private sale by an owner\n\n"
+    "Output ONLY the ads that should be removed, in this format:\n"
+    "#123 AGENCY: contains 'realitná kancelária'\n"
+    "#456 RENTAL: mentions 'mesačný nájom'\n\n"
+    "If the ad looks like a normal private sale of property in Slovakia, do not include it in your response.\n\n"
+    "Ads:\n---\n"
     )
     return intro + "\n\n".join("\n".join(block) for block in batch)
 
