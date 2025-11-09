@@ -22,12 +22,19 @@ export function getCategories() {
 export async function startScrape(filters) {
   return apiRequest('/scrape', {
     method: 'POST',
-    body: JSON.stringify(filters),
+    body: JSON.stringify({ ...filters, mode: filters.mode || 'new' }),
   });
 }
 
-export async function getProgress() {
-  return apiRequest('/progress');
+export async function fetchResults(filters) {
+  return apiRequest('/scrape', {
+    method: 'POST',
+    body: JSON.stringify({ ...filters, mode: 'old' }),
+  });
+}
+
+export async function getJobStatus() {
+  return apiRequest('/job_status');
 }
 
 export async function cancelScrape() {

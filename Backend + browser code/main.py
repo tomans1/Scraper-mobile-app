@@ -79,6 +79,52 @@ LATEST_RESULTS_FILE = os.path.join(DATA_DIR, "latest_results.txt")
 progress_state = {"phase": "", "done": 0, "total": 0}
 SERVER_START_TIME = datetime.utcnow()
 progress_lock = threading.Lock()
+job_state_lock = threading.Lock()
+job_state = {
+    "status": "idle",
+    "mode": None,
+    "started_at": None,
+    "finished_at": None,
+    "results_ready": False,
+    "error": None,
+    "phase": "",
+    "done": 0,
+    "total": 0,
+    "last_count": 0,
+}
+
+
+def set_job_state(**updates):
+    with job_state_lock:
+        job_state.update(updates)
+        return dict(job_state)
+
+
+def get_job_state():
+    with job_state_lock:
+        return dict(job_state)
+
+
+def reset_job_state():
+    return set_job_state(
+        status="idle",
+        mode=None,
+        started_at=None,
+        finished_at=None,
+        results_ready=False,
+        error=None,
+        last_count=0,
+        phase=progress_state.get("phase", ""),
+        done=progress_state.get("done", 0),
+        total=progress_state.get("total", 0),
+    )
+
+
+def _now_iso():
+    return datetime.utcnow().isoformat() + "Z"
+
+
+reset_job_state()
 
 
 def reset_progress():
@@ -239,7 +285,15 @@ def auth_status():
 def cancel():
     terminate_running_process()
     reset_progress()
-    return jsonify({"ok": True})
+    set_job_state(
+        status="cancelled",
+        finished_at=_now_iso(),
+        results_ready=False,
+        error=None,
+        mode=None,
+        last_count=0,
+    )
+    return jsonify({"ok": True, "status": get_job_state()})
 
 
 @app.route("/restart", methods=["POST"])
@@ -249,6 +303,15 @@ def restart():
     if running_process:
         running_process.terminate()
         running_process = None
+    reset_progress()
+    set_job_state(
+        status="restarting",
+        finished_at=_now_iso(),
+        results_ready=False,
+        error=None,
+        mode=None,
+        last_count=0,
+    )
     from threading import Timer
     Timer(0.2, lambda: os._exit(0)).start()
     return "Restarting", 200
@@ -274,6 +337,11 @@ def update_progress(phase=None, *, done=None, total=None):
             progress_state["done"] = done
         if total is not None:
             progress_state["total"] = total
+    set_job_state(
+        phase=progress_state.get("phase", ""),
+        done=progress_state.get("done", 0),
+        total=progress_state.get("total", 0),
+    )
 
 def parse_result_blocks(filepath):
     logging.debug("Parsing result blocks from %s", filepath)
@@ -349,75 +417,139 @@ def scrape():
     date_end   = data.get("date_end")
 
     if mode == "old":
-        return fetch_previous_results(subcats, date_start, date_end)
+        results = fetch_previous_results(subcats, date_start, date_end)
+        return jsonify(results)
+
+    current_state = get_job_state()
+    if current_state.get("status") in {"running", "starting"}:
+        return jsonify({
+            "ok": False,
+            "error": "Zber už prebieha.",
+            "status": current_state,
+        })
+
+    job_started_at = _now_iso()
+    reset_progress()
+    set_job_state(
+        status="starting",
+        mode=mode,
+        started_at=job_started_at,
+        finished_at=None,
+        results_ready=False,
+        error=None,
+        last_count=0,
+    )
+
+    payload = {
+        "subcats": subcats,
+        "date_start": date_start,
+        "date_end": date_end,
+    }
+
+    worker = threading.Thread(target=_run_scrape_job, args=(payload,), daemon=True)
+    worker.start()
+
+    return jsonify({"ok": True, "status": get_job_state()})
+
+
+def _run_scrape_job(payload):
+    subcats = payload.get("subcats", set())
+    date_start = payload.get("date_start")
+    date_end = payload.get("date_end")
+
     try:
-        # Load old links from GitHub and inject to disk for phase 1
-        old_links = load_old_links()
-        with open("Data/old_results.txt", "w", encoding="utf-8") as f:
-            f.write("\n".join(old_links) + "\n")
-
-        port = os.environ.get("PORT", "5000")
-        progress_url = f"http://127.0.0.1:{port}/progress_update"
-
-        run_step('python "1- Sitemap links.py"', "1/5 Zber sitemap", progress_url)
-        run_step('python "2 - Local filtering.py"', "2/5 Prvé filtrovanie", progress_url)
-        run_step('python "3 - Ad HTML scraper.py"', "3/5 Sťahovanie inzerátov", progress_url)
-        run_step('python "4 - Filter by description.py"', "4/5 Filtrovanie popisov", progress_url)
-        run_step('python "5 - OpenAI filtering.py"', "5/5 OpenAI filtrovanie", progress_url)
-
-        # This code is not used because it is done in 1 - sitemaps 
-        # # After phase 1, update old_links in GitHub
-        # with open("Data/acquired_links.txt", encoding="utf-8") as f:
-        #     # Preserve the timestamp portion so future runs can keep history
-        #     current_links = [line.strip() for line in f if line.strip()]
-        # save_old_links(current_links)
-
-        new_results = []
-        if os.path.exists(PHASE3_FILE):
-            with open(PHASE3_FILE, encoding="utf-8") as f:
-                phase3_text = f.read()
-
-            # Store latest run separately so we only return fresh results
-            with open(LATEST_RESULTS_FILE, "w", encoding="utf-8") as lf:
-                lf.write(phase3_text)
-
-            new_results = parse_result_blocks_text(phase3_text)
-            append_phase3_results(phase3_text)
-
-        # Filter new results according to provided filters
-        filtered = []
-        d1 = _parse_date(date_start) if date_start else None
-        d2 = _parse_date(date_end)   if date_end   else None
-
-        for res in new_results:
-            if subcats and res.get("subcat", "").strip() not in subcats:
-                continue
-            if d1 and d2:
-                ad_date = res.get("date")
-                if ad_date and not (d1 <= ad_date.date() <= d2):
-                    continue
-
-            filtered.append({
-                "url": res.get("url"),
-                "subcat": res.get("subcat", ""),
-                "date": res.get("date").strftime("%d/%m/%Y %H:%M") if res.get("date") else "",
-            })
-
-        update_progress("Hotovo", done=1, total=1)
-        return jsonify(filtered)
-
+        set_job_state(status="running")
+        results = _execute_new_scrape(subcats, date_start, date_end)
+        set_job_state(
+            status="finished",
+            finished_at=_now_iso(),
+            results_ready=True,
+            error=None,
+            last_count=len(results),
+        )
     except subprocess.CalledProcessError as e:
         logging.error("Step failed: %s", e)
         traceback.print_exc()
         message = f"Skript '{e.cmd}' skončil s chybovým kódom {e.returncode}"
-        return jsonify({"error": message}), 500
+        set_job_state(
+            status="failed",
+            finished_at=_now_iso(),
+            results_ready=False,
+            error=message,
+        )
     except Exception as e:
         logging.exception("Unexpected error during scrape")
         update_progress("❌ Neznáma chyba", done=0, total=1)
-        return jsonify({"error": f"Neočakávaná chyba: {e}"}), 500
+        set_job_state(
+            status="failed",
+            finished_at=_now_iso(),
+            results_ready=False,
+            error=f"Neočakávaná chyba: {e}",
+        )
+
+
+def _execute_new_scrape(subcats, date_start, date_end):
+    # Load old links from GitHub and inject to disk for phase 1
+    old_links = load_old_links()
+    with open("Data/old_results.txt", "w", encoding="utf-8") as f:
+        f.write("\n".join(old_links) + "\n")
+
+    port = os.environ.get("PORT", "5000")
+    progress_url = f"http://127.0.0.1:{port}/progress_update"
+
+    run_step('python "1- Sitemap links.py"', "1/5 Zber sitemap", progress_url)
+    run_step('python "2 - Local filtering.py"', "2/5 Prvé filtrovanie", progress_url)
+    run_step('python "3 - Ad HTML scraper.py"', "3/5 Sťahovanie inzerátov", progress_url)
+    run_step('python "4 - Filter by description.py"', "4/5 Filtrovanie popisov", progress_url)
+    run_step('python "5 - OpenAI filtering.py"', "5/5 OpenAI filtrovanie", progress_url)
+
+    # This code is not used because it is done in 1 - sitemaps
+    # # After phase 1, update old_links in GitHub
+    # with open("Data/acquired_links.txt", encoding="utf-8") as f:
+    #     # Preserve the timestamp portion so future runs can keep history
+    #     current_links = [line.strip() for line in f if line.strip()]
+    # save_old_links(current_links)
+
+    new_results = []
+    if os.path.exists(PHASE3_FILE):
+        with open(PHASE3_FILE, encoding="utf-8") as f:
+            phase3_text = f.read()
+
+        # Store latest run separately so we only return fresh results
+        with open(LATEST_RESULTS_FILE, "w", encoding="utf-8") as lf:
+            lf.write(phase3_text)
+
+        new_results = parse_result_blocks_text(phase3_text)
+        append_phase3_results(phase3_text)
+
+    # Filter new results according to provided filters
+    filtered = []
+    d1 = _parse_date(date_start) if date_start else None
+    d2 = _parse_date(date_end)   if date_end   else None
+
+    for res in new_results:
+        if subcats and res.get("subcat", "").strip() not in subcats:
+            continue
+        if d1 and d2:
+            ad_date = res.get("date")
+            if ad_date and not (d1 <= ad_date.date() <= d2):
+                continue
+
+        filtered.append({
+            "url": res.get("url"),
+            "subcat": res.get("subcat", ""),
+            "date": res.get("date").strftime("%d/%m/%Y %H:%M") if res.get("date") else "",
+        })
+
+    with progress_lock:
+        final_total = progress_state.get("total", 0)
+    if not final_total:
+        final_total = max(len(filtered), 1)
+    update_progress("Hotovo", done=final_total, total=final_total)
+    return filtered
+
 
 def fetch_previous_results(subcats, start_date, end_date):
-    update_progress("Načítavam výsledky", done=0, total=1)
     text = load_phase3_results()
     if text:
         all_results = parse_result_blocks_text(text)
@@ -439,11 +571,10 @@ def fetch_previous_results(subcats, start_date, end_date):
         filtered.append({
             "url": res.get("url"),
             "subcat": res.get("subcat", ""),
-            "date": res.get("date").strftime("%d/%m/%Y %H:%M") if res.get("date") else ""
+            "date": res.get("date").strftime("%d/%m/%Y %H:%M") if res.get("date") else "",
         })
 
-    update_progress("Hotovo", done=1, total=1)
-    return jsonify(filtered)
+    return filtered
 
 @app.route("/feedback", methods=["POST"])
 def feedback():
@@ -464,17 +595,29 @@ import logging
 # Suppress Werkzeug logs for /progress
 log = logging.getLogger('werkzeug')
 
+def _progress_payload():
+    with progress_lock:
+        progress_snapshot = dict(progress_state)
+    payload = dict(progress_snapshot)
+    payload["job"] = get_job_state()
+    return payload
+
+
 @app.route("/progress", methods=["GET"])
 @require_auth
 def progress():
     if log.level <= logging.INFO:
         log.setLevel(logging.WARNING)
-        with progress_lock:
-            resp = jsonify(dict(progress_state))
+        resp = jsonify(_progress_payload())
         log.setLevel(logging.INFO)
         return resp
-    with progress_lock:
-        return jsonify(dict(progress_state))
+    return jsonify(_progress_payload())
+
+
+@app.route("/job_status", methods=["GET"])
+@require_auth
+def job_status():
+    return jsonify(_progress_payload())
 
 
 @app.route("/app")

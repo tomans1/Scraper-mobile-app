@@ -20,6 +20,19 @@ import { ServerStatus } from '../../components/ServerStatus';
 import * as ScraperAPI from '../../api/scraper';
 import { useAuth } from '../../hooks/useAuth';
 
+const INITIAL_JOB_STATE = {
+  status: 'idle',
+  mode: null,
+  started_at: null,
+  finished_at: null,
+  results_ready: false,
+  error: null,
+  phase: '',
+  done: 0,
+  total: 0,
+  last_count: 0,
+};
+
 export default function HomeScreen() {
   const router = useRouter();
   const { handleLogout } = useAuth();
@@ -29,21 +42,49 @@ export default function HomeScreen() {
   const [newOnly, setNewOnly] = useState(false);
   const [dateStart, setDateStart] = useState(null);
   const [dateEnd, setDateEnd] = useState(null);
-  const [isRunning, setIsRunning] = useState(false);
+  const [jobState, setJobState] = useState(() => ({ ...INITIAL_JOB_STATE }));
   const [progress, setProgress] = useState(0);
   const [progressLabel, setProgressLabel] = useState('');
   const [stageLabel, setStageLabel] = useState('');
   const [results, setResults] = useState([]);
+  const [resultsExpanded, setResultsExpanded] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedbackText, setFeedbackText] = useState('');
   const [serverStatus, setServerStatus] = useState('checking');
   const [lastFilters, setLastFilters] = useState(null);
 
-  const progressIntervalRef = useRef(null);
-  const statusIntervalRef = useRef(null);
-  const shouldAutoLoadResultsRef = useRef(false);
+  const jobStatusIntervalRef = useRef(null);
+  const serverStatusIntervalRef = useRef(null);
+  const pendingResultsJobRef = useRef(null);
+  const lastNotifiedErrorRef = useRef(null);
 
   const categories = ScraperAPI.getCategories();
+
+  const softResetUI = useCallback(
+    (options = {}) => {
+      const { skipNavigation = false } = options;
+      setShowFilters(false);
+      setSelectedCategories([]);
+      setNewOnly(false);
+      setDateStart(null);
+      setDateEnd(null);
+      setResults([]);
+      setResultsExpanded(false);
+      setProgress(0);
+      setProgressLabel('');
+      setStageLabel('');
+      setShowFeedback(false);
+      setFeedbackText('');
+      setLastFilters(null);
+      setJobState({ ...INITIAL_JOB_STATE });
+      pendingResultsJobRef.current = null;
+      lastNotifiedErrorRef.current = null;
+      if (!skipNavigation) {
+        router.replace('/');
+      }
+    },
+    [router]
+  );
 
   const toggleCategory = (cat) => {
     setSelectedCategories((prev) =>
@@ -67,17 +108,16 @@ export default function HomeScreen() {
           return false;
         }
 
-        const response = await ScraperAPI.startScrape({
-          ...baseFilters,
-          mode: 'old',
-        });
+        const response = await ScraperAPI.fetchResults(baseFilters);
 
         const normalized = Array.isArray(response)
           ? response
           : Array.isArray(response?.results)
             ? response.results
             : [];
+
         setResults(normalized);
+        setResultsExpanded(normalized.length > 0);
         return true;
       } catch (err) {
         if (showErrors) {
@@ -89,112 +129,221 @@ export default function HomeScreen() {
     [dateEnd, dateStart, lastFilters, selectedCategories]
   );
 
-  const startProgressPolling = useCallback(() => {
-    if (progressIntervalRef.current)
-      clearInterval(progressIntervalRef.current);
-
-    progressIntervalRef.current = setInterval(async () => {
-      try {
-        const data = await ScraperAPI.getProgress();
-        const done = Number(data.done) || 0;
-        const total = Number(data.total) || 0;
-        const pct = total > 0 ? (done / total) * 100 : 15;
-        setProgress(pct);
-        setStageLabel(data.phase || '');
-
-        const labels = {
-          '1/5 Zber sitemap': 'Sitemapy stiahnuté',
-          '2/5 Prvé filtrovanie': 'Filtrované',
-          '3/5 Sťahovanie inzerátov': 'Stiahnuté',
-          '4/5 Filtrovanie popisov': 'Filtrované',
-          '5/5 OpenAI filtrovanie': 'Vyhodnotené',
-        };
-        const prefix = labels[data.phase] ? labels[data.phase] + ': ' : '';
-        setProgressLabel(`${prefix}${done}/${total}`);
-
-        if (data.phase === 'Hotovo') {
-          if (progressIntervalRef.current)
-            clearInterval(progressIntervalRef.current);
-          setIsRunning(false);
-          if (shouldAutoLoadResultsRef.current) {
-            shouldAutoLoadResultsRef.current = false;
-            await loadLatestResults(undefined, { showErrors: true });
-          }
-        }
-      } catch (err) {
-        if (progressIntervalRef.current)
-          clearInterval(progressIntervalRef.current);
-      }
-    }, 1000);
-  }, [loadLatestResults]);
-
   const useDateRange = useMemo(
     () => !newOnly && dateStart && dateEnd,
     [dateEnd, dateStart, newOnly]
   );
 
-  const startScrape = async (mode) => {
+  const pollJobStatus = useCallback(async () => {
     try {
-      setIsRunning(true);
-      setProgress(0);
-      setProgressLabel('');
-      setStageLabel('');
-      setResults([]);
+      const data = await ScraperAPI.getJobStatus();
+      const phase = data?.phase || '';
+      const doneValue = Number(data?.done) || 0;
+      const totalValue = Number(data?.total) || 0;
+      const job = data?.job || {};
+      const status = job.status || 'idle';
 
-      const baseFilters = {
-        subcategories: selectedCategories,
-        date_start: useDateRange ? dateStart : null,
-        date_end: useDateRange ? dateEnd : null,
+      const effectivePhase = job.phase || phase || '';
+      const effectiveDone = Number.isFinite(Number(job.done))
+        ? Number(job.done)
+        : doneValue;
+      const effectiveTotal = Number.isFinite(Number(job.total))
+        ? Number(job.total)
+        : totalValue;
+
+      const stageLabels = {
+        '1/5 Zber sitemap': 'Zber sitemap',
+        '2/5 Prvé filtrovanie': 'Prvé filtrovanie',
+        '3/5 Sťahovanie inzerátov': 'Sťahovanie inzerátov',
+        '4/5 Filtrovanie popisov': 'Filtrovanie popisov',
+        '5/5 OpenAI filtrovanie': 'OpenAI filtrovanie',
       };
 
-      setLastFilters(baseFilters);
-      const payload = { ...baseFilters, mode };
+      const baseStage = stageLabels[effectivePhase] || (effectivePhase === 'Hotovo' ? '' : effectivePhase);
 
-      shouldAutoLoadResultsRef.current = mode === 'new';
+      let nextStageLabel = baseStage;
+      if (status === 'finished') {
+        nextStageLabel = '✅ Zber dokončený';
+      } else if (status === 'failed') {
+        nextStageLabel = '❌ Zber zlyhal';
+      } else if (status === 'cancelled') {
+        nextStageLabel = 'Zber bol zrušený';
+      }
+      setStageLabel(nextStageLabel);
 
-      startProgressPolling();
-      const response = await ScraperAPI.startScrape(payload);
-      const normalized = Array.isArray(response)
-        ? response
-        : Array.isArray(response?.results)
-          ? response.results
-          : [];
-      setResults(normalized);
-      setProgress(100);
-      setProgressLabel('✅ Hotovo!');
-      setIsRunning(false);
-      if (mode !== 'new') {
-        shouldAutoLoadResultsRef.current = false;
+      const isActive = status === 'running' || status === 'starting';
+      const progressValue = effectiveTotal > 0
+        ? Math.min(100, (effectiveDone / effectiveTotal) * 100)
+        : isActive
+          ? 10
+          : status === 'finished'
+            ? 100
+            : 0;
+      setProgress(progressValue);
+
+      let label = '';
+      if (status === 'starting') {
+        label = 'Pripravujem zber...';
+      } else if (status === 'running') {
+        const prefix = stageLabels[effectivePhase]
+          ? `${stageLabels[effectivePhase]}: `
+          : '';
+        if (effectiveTotal > 1) {
+          label = `${prefix}${effectiveDone}/${effectiveTotal}`;
+        } else if (prefix) {
+          label = prefix.trim();
+        } else {
+          label = 'Spracúvam...';
+        }
+      } else if (status === 'finished') {
+        const count = job.last_count ?? effectiveDone;
+        label = `✅ Výsledky pripravené (${count || 0})`;
+      } else if (status === 'failed') {
+        label = '❌ Zber zlyhal';
+      } else if (status === 'cancelled') {
+        label = '⏹️ Zber zrušený';
+      } else if (status === 'restarting') {
+        label = 'Reštart servera prebieha';
+      }
+      setProgressLabel(label);
+
+      setJobState((prev) => ({
+        ...prev,
+        ...job,
+        phase: job.phase ?? effectivePhase,
+        done: Number.isFinite(Number(job.done)) ? Number(job.done) : effectiveDone,
+        total: Number.isFinite(Number(job.total)) ? Number(job.total) : effectiveTotal,
+      }));
+
+      const startedAt = job.started_at;
+      if (status === 'finished' && job.results_ready && startedAt && pendingResultsJobRef.current === startedAt) {
+        const success = await loadLatestResults(undefined, { showErrors: true });
+        if (success) {
+          pendingResultsJobRef.current = null;
+        }
+      }
+
+      if (['failed', 'cancelled'].includes(status)) {
+        pendingResultsJobRef.current = null;
+      }
+
+      if (status === 'failed' && job.error && lastNotifiedErrorRef.current !== job.error) {
+        Alert.alert('Chyba', job.error);
+        lastNotifiedErrorRef.current = job.error;
+      }
+      if (status !== 'failed') {
+        lastNotifiedErrorRef.current = null;
       }
     } catch (err) {
-      Alert.alert('Chyba', 'Chyba pri spracovaní');
-      setIsRunning(false);
-      shouldAutoLoadResultsRef.current = false;
+      // Silently ignore transient errors
+    }
+  }, [loadLatestResults]);
+  const startScrape = async () => {
+    if (['running', 'starting'].includes(jobState.status)) {
+      return;
+    }
+
+    const baseFilters = {
+      subcategories: selectedCategories,
+      date_start: useDateRange ? dateStart : null,
+      date_end: useDateRange ? dateEnd : null,
+    };
+
+    setLastFilters(baseFilters);
+    setResults([]);
+    setResultsExpanded(false);
+    setProgress(0);
+    setProgressLabel('Pripravujem zber...');
+    setStageLabel('');
+
+    const provisionalId = new Date().toISOString();
+    pendingResultsJobRef.current = provisionalId;
+    lastNotifiedErrorRef.current = null;
+    setJobState({
+      ...INITIAL_JOB_STATE,
+      status: 'starting',
+      mode: 'new',
+      started_at: provisionalId,
+    });
+
+    try {
+      const response = await ScraperAPI.startScrape({ ...baseFilters, mode: 'new' });
+      const jobInfo = response?.status || response?.job;
+
+      if (response?.ok === false) {
+        if (jobInfo) {
+          setJobState((prev) => ({ ...prev, ...jobInfo }));
+          pendingResultsJobRef.current = jobInfo.started_at || null;
+        }
+        Alert.alert('Info', response?.error || 'Zber už prebieha.');
+        return;
+      }
+
+      const startedAt = jobInfo?.started_at || provisionalId;
+      pendingResultsJobRef.current = startedAt;
+
+      setJobState((prev) => ({
+        ...prev,
+        ...jobInfo,
+        status: jobInfo?.status || 'starting',
+        mode: 'new',
+        started_at: startedAt,
+        results_ready: false,
+        error: null,
+        last_count: 0,
+      }));
+    } catch (err) {
+      Alert.alert('Chyba', 'Chyba pri spustení zberu');
+      pendingResultsJobRef.current = null;
+      setJobState({ ...INITIAL_JOB_STATE });
     }
   };
 
   const cancelScrape = async () => {
     try {
-      await ScraperAPI.cancelScrape();
-      if (progressIntervalRef.current)
-        clearInterval(progressIntervalRef.current);
-      shouldAutoLoadResultsRef.current = false;
-      setIsRunning(false);
+      const response = await ScraperAPI.cancelScrape();
+      pendingResultsJobRef.current = null;
       setProgress(0);
       setProgressLabel('');
       setStageLabel('');
+      const status = response?.status;
+      if (status) {
+        setJobState((prev) => ({ ...prev, ...status }));
+      } else {
+        setJobState({ ...INITIAL_JOB_STATE, status: 'cancelled' });
+      }
     } catch (err) {
       Alert.alert('Chyba', 'Chyba pri zrušení');
     }
   };
 
-  const restartApp = async () => {
-    try {
-      await ScraperAPI.restartScraper();
-      Alert.alert('Info', 'Aplikácia bola reštartovaná. Počkaj ~1 minútu.');
-    } catch (err) {
-      Alert.alert('Chyba', 'Chyba pri reštarte');
-    }
+  const restartApp = () => {
+    Alert.alert(
+      'Resetovať zber?',
+      'Týmto sa reštartuje backend. Prosím, počkajte 1–2 minúty a počas tohto času aplikáciu nepoužívajte.',
+      [
+        { text: 'Zrušiť', style: 'cancel' },
+        {
+          text: 'Resetovať',
+          style: 'destructive',
+          onPress: () => {
+            (async () => {
+              try {
+                await ScraperAPI.restartScraper();
+                setJobState((prev) => ({ ...prev, status: 'restarting', results_ready: false }));
+                pendingResultsJobRef.current = null;
+                Alert.alert('Info', 'Backend sa reštartuje. Počkajte 1–2 minúty.');
+                setTimeout(() => {
+                  softResetUI();
+                }, 2500);
+              } catch (err) {
+                Alert.alert('Chyba', 'Chyba pri reštarte');
+              }
+            })();
+          },
+        },
+      ]
+    );
   };
 
   const sendFeedback = async () => {
@@ -242,13 +391,22 @@ export default function HomeScreen() {
   };
 
   useEffect(() => {
-    checkServerStatus();
-    statusIntervalRef.current = setInterval(checkServerStatus, 60000);
+    pollJobStatus();
+    jobStatusIntervalRef.current = setInterval(pollJobStatus, 1500);
     return () => {
-      if (statusIntervalRef.current)
-        clearInterval(statusIntervalRef.current);
-      if (progressIntervalRef.current)
-        clearInterval(progressIntervalRef.current);
+      if (jobStatusIntervalRef.current)
+        clearInterval(jobStatusIntervalRef.current);
+    };
+  }, [pollJobStatus]);
+
+  useEffect(() => {
+    checkServerStatus();
+    serverStatusIntervalRef.current = setInterval(checkServerStatus, 60000);
+    return () => {
+      if (serverStatusIntervalRef.current)
+        clearInterval(serverStatusIntervalRef.current);
+      if (jobStatusIntervalRef.current)
+        clearInterval(jobStatusIntervalRef.current);
     };
   }, [checkServerStatus]);
 
@@ -292,11 +450,9 @@ export default function HomeScreen() {
   };
 
   const handleLoadPreviousResults = useCallback(async () => {
-    setIsRunning(true);
-    setProgress(0);
-    setProgressLabel('');
+    setProgressLabel('Načítavam výsledky...');
     setStageLabel('');
-    shouldAutoLoadResultsRef.current = false;
+    pendingResultsJobRef.current = null;
 
     const baseFilters = {
       subcategories: selectedCategories,
@@ -308,20 +464,43 @@ export default function HomeScreen() {
 
     const success = await loadLatestResults(baseFilters);
     if (success) {
-      setProgress(100);
-      setProgressLabel('✅ Hotovo!');
+      setProgress(0);
+      setProgressLabel('Predchádzajúce výsledky načítané');
+      setStageLabel('');
+    } else {
+      setProgressLabel('');
     }
-    setIsRunning(false);
+    setJobState((prev) => ({ ...prev, status: 'idle' }));
   }, [dateEnd, dateStart, loadLatestResults, selectedCategories, useDateRange]);
+
+  const isRunning = jobState.status === 'running' || jobState.status === 'starting';
+  const showKillButton = jobState.status === 'running' || jobState.status === 'starting';
+  const disableStart = isRunning || jobState.status === 'restarting';
+  const completionInfo = jobState.status === 'finished'
+    ? `Posledný zber: ${jobState.last_count ?? results.length} záznamov`
+    : '';
+
+  const handleHeaderPress = useCallback(() => {
+    softResetUI({ skipNavigation: true });
+  }, [softResetUI]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
-        <View>
+        <TouchableOpacity
+          onPress={handleHeaderPress}
+          style={styles.headerTitleWrapper}
+          activeOpacity={0.7}
+        >
           <Text style={styles.headerTitle}>🔥 Inferno Scraper</Text>
           <Text style={styles.headerSubtitle}>Lead finder pre reality.bazos.sk</Text>
-        </View>
+        </TouchableOpacity>
         <View style={styles.headerActions}>
+          {showKillButton && (
+            <TouchableOpacity onPress={cancelScrape} style={styles.killButton}>
+              <Text style={styles.killButtonText}>❌ Zrušiť zber</Text>
+            </TouchableOpacity>
+          )}
           <ServerStatus status={serverStatus} onWake={handleWakeServer} />
           <TouchableOpacity onPress={restartApp} style={styles.headerIcon}>
             <RefreshCw size={20} color="#6b7280" />
@@ -345,26 +524,17 @@ export default function HomeScreen() {
           <View style={styles.buttonsGroup}>
             <PrimaryButton
               title={isRunning ? 'Spúšťanie...' : 'Spustiť nový zber'}
-              onPress={() => startScrape('new')}
-              disabled={isRunning}
+              onPress={startScrape}
+              disabled={disableStart}
               style={{ flex: 1 }}
             />
             <PrimaryButton
               title="Predchádzajúce výsledky"
               onPress={handleLoadPreviousResults}
-              disabled={isRunning}
+              disabled={isRunning || jobState.status === 'restarting'}
               style={[{ flex: 1, backgroundColor: '#3b82f6' }]}
             />
           </View>
-
-          {isRunning && (
-            <View style={styles.cancelGroup}>
-              <SecondaryButton
-                title="❌ Zrušiť zber"
-                onPress={cancelScrape}
-              />
-            </View>
-          )}
 
           {(progress > 0 || progressLabel) && (
             <ProgressBar
@@ -374,12 +544,28 @@ export default function HomeScreen() {
             />
           )}
 
+          {completionInfo ? (
+            <Text style={styles.completionLabel}>{completionInfo}</Text>
+          ) : null}
+
           {results.length > 0 && (
-            <ResultsList
-              items={results}
-              count={results.length}
-              onDownload={handleDownload}
-            />
+            <View style={styles.resultsSection}>
+              <TouchableOpacity
+                onPress={() => setResultsExpanded((prev) => !prev)}
+                style={styles.resultsToggle}
+              >
+                <Text style={styles.resultsToggleText}>
+                  {resultsExpanded ? 'Skryť výsledky' : 'Zobraziť výsledky'} ({results.length})
+                </Text>
+              </TouchableOpacity>
+              {resultsExpanded && (
+                <ResultsList
+                  items={results}
+                  count={results.length}
+                  onDownload={handleDownload}
+                />
+              )}
+            </View>
           )}
 
           <View style={styles.feedbackSection}>
@@ -440,6 +626,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
   },
+  headerTitleWrapper: {
+    flexShrink: 1,
+  },
   headerTitle: {
     fontSize: 20,
     fontWeight: '700',
@@ -454,6 +643,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+  },
+  killButton: {
+    backgroundColor: '#fee2e2',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  killButtonText: {
+    color: '#b91c1c',
+    fontWeight: '600',
+    fontSize: 12,
   },
   headerIcon: {
     padding: 8,
@@ -491,8 +691,22 @@ const styles = StyleSheet.create({
   buttonsGroup: {
     gap: 8,
   },
-  cancelGroup: {
-    marginTop: 12,
+  completionLabel: {
+    fontSize: 12,
+    color: '#047857',
+    marginTop: 4,
+  },
+  resultsSection: {
+    marginTop: 24,
+  },
+  resultsToggle: {
+    alignSelf: 'flex-start',
+    paddingVertical: 6,
+  },
+  resultsToggleText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2563eb',
   },
   feedbackSection: {
     marginTop: 24,
