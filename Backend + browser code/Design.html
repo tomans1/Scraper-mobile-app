@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+  <!-- Litepicker -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/litepicker/dist/css/litepicker.css">
+  <script src="https://cdn.jsdelivr.net/npm/litepicker/dist/bundle.js"></script>
+
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>Inferno Scraper</title>
+
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Custom styles + app hooks -->
+  <link rel="stylesheet" href="static/css/design.css">
+  <script src="static/js/app.js" defer></script>
+</head>
+
+<body class="min-h-screen antialiased selection:bg-white/10 selection:text-white ui-bg">
+  <!-- Noise overlay -->
+  <div aria-hidden="true" class="ui-noise"></div>
+
+  <!-- Top-right actions -->
+  <!-- Top-right actions -->
+  <div class="fixed top-4 right-4 z-40 flex items-center gap-3">
+    <!-- Logs FAB + tooltip -->
+    <div class="relative group">
+      <button
+        id="logs-icon"
+        type="button"
+        aria-label="Zobraziť logy"
+        onclick="document.getElementById('results-section').classList.toggle('hidden')"
+        class="fab-icon ring-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+        title="Logy"
+      >🗒️</button>
+      <div class="tooltip group-hover:opacity-100">Zobraziť/Skryť logy</div>
+    </div>
+
+    <!-- Restart FAB + tooltip -->
+    <div class="relative group">
+      <button
+        id="restart-icon"
+        onclick="restartApp()"
+        aria-label="Reštartovať aplikáciu"
+        class="fab-icon ring-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+        title="Reštart"
+      >🔄</button>
+      <div class="tooltip group-hover:opacity-100">Po reštarte počkaj ~1 min</div>
+    </div>
+
+    <!-- Back to scraper FAB + tooltip -->
+    <div class="relative group">
+      <a
+        href="https://bazosscraper.onrender.com/"
+        aria-label="Späť na scraper"
+        class="fab-icon ring-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+        title="Späť"
+      >⬅️</a>
+      <div class="tooltip group-hover:opacity-100">Späť na hlavnú aplikáciu</div>
+    </div>
+  </div>
+
+
+  <!-- Header bar -->
+  <header class="header-glass">
+    <div class="mx-auto flex max-w-5xl items-center gap-3 px-4">
+      <div class="text-2xl hover:animate-bounce-slow cursor-default">🔥</div>
+      <div class="flex flex-col">
+        <h1 class="text-xl font-extrabold tracking-tight">
+          <span class="inferno-text">Inferno Scraper</span>
+        </h1>
+        <span class="text-xs uppercase tracking-[0.18em] text-muted">Lead finder pre reality.bazos.sk</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Page container -->
+  <main class="mx-auto mt-8 w-full max-w-3xl px-4 pb-20">
+    <!-- Primary card -->
+    <section class="glass-card animate-riseIn">
+      <!-- Title -->
+      <div class="mb-6 text-center">
+        <h2 class="text-2xl font-bold tracking-tight ui-headline">
+          Fiery <span class="inferno-text">Pipeline</span>
+        </h2>
+        <p class="mt-1 text-sm text-muted">Zber, filtrovanie, hodnotenie. Funkčnosť nezmenená.</p>
+      </div>
+
+      <!-- Actions row -->
+      <div class="flex items-center justify-between">
+        <!-- Filters trigger -->
+        <button
+          type="button"
+          onclick="toggleAdvancedFilters()"
+          aria-haspopup="dialog"
+          aria-controls="advanced-filters"
+          class="btn-secondary inline-flex items-center gap-2"
+        >
+          ⚙️ <span class="caps-label">Zobraziť filtre</span>
+        </button>
+
+        <!-- Text logs toggle (secondary) -->
+        <button
+          type="button"
+          onclick="document.getElementById('results-section').classList.toggle('hidden')"
+          class="btn-tertiary hidden sm:inline-flex"
+          aria-label="Prepnúť logy"
+        >
+          🗒️ Logy
+        </button>
+      </div>
+
+      <!-- Filters drawer -->
+      <div
+        id="advanced-filters"
+        class="drawer hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Pokročilé filtre"
+      >
+        <div class="drawer-content">
+          <div class="mb-5">
+            <div class="caps-label mb-2">Podkategórie</div>
+            <div id="subcat-options" class="grid grid-cols-2 gap-2 ui-stagger"></div>
+          </div>
+
+          <div class="space-y-2">
+            <div class="caps-label">Dátum</div>
+            <input
+              id="date-range"
+              class="input-glass"
+              placeholder="Vyberte dátumy"
+              readonly
+              aria-label="Rozsah dátumu"
+            >
+            <label class="mt-2 inline-flex items-center gap-2 text-sm text-muted">
+              <input id="new-only" type="checkbox" class="checkbox" onchange="toggleDateInputs(this)">
+              <span class="select-none">Iba nové inzeráty</span>
+            </label>
+          </div>
+
+          <div class="mt-6 flex justify-end">
+            <button type="button" onclick="toggleAdvancedFilters()" class="btn-tertiary">Zavrieť</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Start/Cancel -->
+      <div id="start-buttons" class="mt-6 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
+        <button
+          type="button"
+          onclick="event.preventDefault(); startProgressPolling(); startScrape('new')"
+          class="btn-primary"
+        >
+          Spustiť nový zber
+        </button>
+
+        <button
+          type="button"
+          onclick="event.preventDefault(); startProgressPolling(); startScrape('old')"
+          class="btn-primary btn-alt"
+        >
+          Zobraziť predchádzajúce výsledky
+        </button>
+      </div>
+
+      <div class="mt-3 flex justify-center">
+        <button
+          id="cancel-btn"
+          type="button"
+          onclick="event.preventDefault(); cancelScrape();"
+          class="btn-primary btn-cancel hidden"
+        >
+          ❌ Zrušiť zber
+        </button>
+      </div>
+
+      <!-- Progress -->
+      <div id="progress-bar" class="mt-8 hidden">
+        <div id="progress-label" class="mb-2 text-lg font-semibold"></div>
+        <div class="progress-outer" aria-label="Priebeh">
+          <div id="progress" class="bar-fill" style="width:0%"></div>
+        </div>
+        <div id="stage-label" class="mt-2 text-xs text-muted"></div>
+      </div>
+
+      <!-- Results / Logs -->
+      <div id="results-section" class="mt-8 hidden">
+        <div class="mb-2 flex items-center justify-between gap-3">
+          <h3 class="text-sm font-semibold tracking-tight">Výsledky</h3>
+          <p id="results-count" class="text-xs text-muted"></p>
+          <button id="download-btn" class="btn-secondary px-3 py-1 text-sm">
+            ⬇️ Stiahnuť
+          </button>
+        </div>
+
+        <div
+          id="output"
+          class="logs-popover"
+          aria-live="polite"
+          aria-busy="false"
+        ></div>
+      </div>
+
+      <!-- Feedback -->
+      <div class="mt-6">
+        <button
+          type="button"
+          onclick="document.getElementById('feedback-box').classList.toggle('hidden')"
+          class="btn-tertiary"
+        >
+          💬 Spätná väzba
+        </button>
+
+        <div id="feedback-box" class="hidden">
+          <textarea
+            rows="2"
+            class="mt-3 w-full rounded-xl border border-white/10 bg-white/5 p-3 text-sm text-white/90 placeholder-white/40 outline-none focus:ring-2 focus:ring-white/30"
+            placeholder="Navrhnite nové kľúčové slovo..."
+          ></textarea>
+
+          <div class="mt-3">
+            <button
+              type="button"
+              class="btn-secondary"
+              onclick="sendFeedback();(function(){const t=document.getElementById('ui-toast');t.classList.add('ui-toast--show');setTimeout(()=>t.classList.remove('ui-toast--show'),2800);})();"
+            >
+              Odoslať
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Toast -->
+  <div id="ui-toast" class="ui-toast" role="status" aria-live="polite">
+    <div class="ui-toast-inner">
+      <span class="mr-2">✅</span> Spätná väzba bola odoslaná
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,11 @@
+flask
+flask-cors
+requests
+beautifulsoup4
+tqdm
+openai
+lxml
+python-dotenv
+bs4
+gunicorn
+itsdangerous

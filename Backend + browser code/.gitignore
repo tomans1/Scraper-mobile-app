@@ -1,0 +1,32 @@
+# Virtual environment
+venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.so
+
+# VS Code settings
+.vscode/
+
+# Logs and runtime files
+*.log
+
+# Environment variables
+.env
+
+# macOS metadata
+.DS_Store
+
+# Windows thumbnail cache
+Thumbs.db
+
+# PyInstaller output
+dist/
+build/
+*.spec
+
+# Scraper output data
+Data/*.txt
+
+run.ps1
