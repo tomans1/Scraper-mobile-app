@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,6 @@ import {
   TextInput,
   Alert,
   Share,
-  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Settings, LogOut, RefreshCw } from 'lucide-react-native';
@@ -38,10 +37,13 @@ export default function HomeScreen() {
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedbackText, setFeedbackText] = useState('');
   const [serverStatus, setServerStatus] = useState('checking');
+  const [lastFilters, setLastFilters] = useState(null);
+
+  const progressIntervalRef = useRef(null);
+  const statusIntervalRef = useRef(null);
+  const shouldAutoLoadResultsRef = useRef(false);
 
   const categories = ScraperAPI.getCategories();
-  let progressInterval = null;
-  let statusInterval = null;
 
   const toggleCategory = (cat) => {
     setSelectedCategories((prev) =>
@@ -49,10 +51,49 @@ export default function HomeScreen() {
     );
   };
 
-  const startProgressPolling = useCallback(() => {
-    if (progressInterval) clearInterval(progressInterval);
+  const loadLatestResults = useCallback(
+    async (overrideFilters, options = {}) => {
+      const { showErrors = true } = options;
+      try {
+        const baseFilters =
+          overrideFilters ||
+          lastFilters || {
+            subcategories: selectedCategories,
+            date_start: dateStart,
+            date_end: dateEnd,
+          };
 
-    progressInterval = setInterval(async () => {
+        if (!baseFilters) {
+          return false;
+        }
+
+        const response = await ScraperAPI.startScrape({
+          ...baseFilters,
+          mode: 'old',
+        });
+
+        const normalized = Array.isArray(response)
+          ? response
+          : Array.isArray(response?.results)
+            ? response.results
+            : [];
+        setResults(normalized);
+        return true;
+      } catch (err) {
+        if (showErrors) {
+          Alert.alert('Chyba', 'Nepodarilo sa načítať výsledky');
+        }
+        return false;
+      }
+    },
+    [dateEnd, dateStart, lastFilters, selectedCategories]
+  );
+
+  const startProgressPolling = useCallback(() => {
+    if (progressIntervalRef.current)
+      clearInterval(progressIntervalRef.current);
+
+    progressIntervalRef.current = setInterval(async () => {
       try {
         const data = await ScraperAPI.getProgress();
         const done = Number(data.done) || 0;
@@ -72,14 +113,25 @@ export default function HomeScreen() {
         setProgressLabel(`${prefix}${done}/${total}`);
 
         if (data.phase === 'Hotovo') {
-          if (progressInterval) clearInterval(progressInterval);
+          if (progressIntervalRef.current)
+            clearInterval(progressIntervalRef.current);
           setIsRunning(false);
+          if (shouldAutoLoadResultsRef.current) {
+            shouldAutoLoadResultsRef.current = false;
+            await loadLatestResults(undefined, { showErrors: true });
+          }
         }
       } catch (err) {
-        if (progressInterval) clearInterval(progressInterval);
+        if (progressIntervalRef.current)
+          clearInterval(progressIntervalRef.current);
       }
     }, 1000);
-  }, []);
+  }, [loadLatestResults]);
+
+  const useDateRange = useMemo(
+    () => !newOnly && dateStart && dateEnd,
+    [dateEnd, dateStart, newOnly]
+  );
 
   const startScrape = async (mode) => {
     try {
@@ -89,30 +141,44 @@ export default function HomeScreen() {
       setStageLabel('');
       setResults([]);
 
-      const useDateRange = !newOnly && dateStart && dateEnd;
-      const filters = {
+      const baseFilters = {
         subcategories: selectedCategories,
         date_start: useDateRange ? dateStart : null,
         date_end: useDateRange ? dateEnd : null,
-        mode: mode,
       };
 
+      setLastFilters(baseFilters);
+      const payload = { ...baseFilters, mode };
+
+      shouldAutoLoadResultsRef.current = mode === 'new';
+
       startProgressPolling();
-      const response = await ScraperAPI.startScrape(filters);
-      setResults(response);
+      const response = await ScraperAPI.startScrape(payload);
+      const normalized = Array.isArray(response)
+        ? response
+        : Array.isArray(response?.results)
+          ? response.results
+          : [];
+      setResults(normalized);
       setProgress(100);
       setProgressLabel('✅ Hotovo!');
       setIsRunning(false);
+      if (mode !== 'new') {
+        shouldAutoLoadResultsRef.current = false;
+      }
     } catch (err) {
       Alert.alert('Chyba', 'Chyba pri spracovaní');
       setIsRunning(false);
+      shouldAutoLoadResultsRef.current = false;
     }
   };
 
   const cancelScrape = async () => {
     try {
       await ScraperAPI.cancelScrape();
-      if (progressInterval) clearInterval(progressInterval);
+      if (progressIntervalRef.current)
+        clearInterval(progressIntervalRef.current);
+      shouldAutoLoadResultsRef.current = false;
       setIsRunning(false);
       setProgress(0);
       setProgressLabel('');
@@ -161,13 +227,11 @@ export default function HomeScreen() {
     router.replace('/(auth)/login');
   };
 
-  const checkServerStatus = async () => {
-    if (serverStatus !== 'waking') {
-      setServerStatus('checking');
-    }
+  const checkServerStatus = useCallback(async () => {
+    setServerStatus((prev) => (prev !== 'waking' ? 'checking' : prev));
     const isOnline = await ScraperAPI.checkServerHealth();
     setServerStatus(isOnline ? 'online' : 'offline');
-  };
+  }, []);
 
   const handleWakeServer = async () => {
     setServerStatus('waking');
@@ -179,55 +243,76 @@ export default function HomeScreen() {
 
   useEffect(() => {
     checkServerStatus();
-    statusInterval = setInterval(checkServerStatus, 60000);
+    statusIntervalRef.current = setInterval(checkServerStatus, 60000);
     return () => {
-      if (statusInterval) clearInterval(statusInterval);
-      if (progressInterval) clearInterval(progressInterval);
+      if (statusIntervalRef.current)
+        clearInterval(statusIntervalRef.current);
+      if (progressIntervalRef.current)
+        clearInterval(progressIntervalRef.current);
     };
+  }, [checkServerStatus]);
+
+  const handleDateRangeChange = useCallback((startValue, endValue) => {
+    if (!startValue && !endValue) {
+      setDateStart(null);
+      setDateEnd(null);
+      return;
+    }
+
+    let nextStart = startValue || null;
+    let nextEnd = endValue || null;
+
+    if (nextStart && !nextEnd) {
+      nextEnd = nextStart;
+    } else if (!nextStart && nextEnd) {
+      nextStart = nextEnd;
+    }
+
+    if (nextStart && nextEnd) {
+      const startDate = new Date(`${nextStart}T00:00:00`);
+      const endDate = new Date(`${nextEnd}T00:00:00`);
+      if (!Number.isNaN(startDate.getTime()) && !Number.isNaN(endDate.getTime())) {
+        if (startDate > endDate) {
+          const tmp = nextStart;
+          nextStart = nextEnd;
+          nextEnd = tmp;
+        }
+      }
+    }
+
+    setDateStart(nextStart);
+    setDateEnd(nextEnd);
   }, []);
 
   const handleNewOnlyToggle = (value) => {
     setNewOnly(value);
     if (value) {
-      setDateStart(null);
-      setDateEnd(null);
+      handleDateRangeChange(null, null);
     }
   };
 
-  const ensureOrderedRange = (startValue, endValue) => {
-    if (!startValue && !endValue) return { startValue, endValue };
-    if (!startValue && endValue) return { startValue: endValue, endValue };
-    if (startValue && !endValue) return { startValue, endValue: startValue };
-    const startDate = new Date(`${startValue}T00:00:00`);
-    const endDate = new Date(`${endValue}T00:00:00`);
-    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
-      return { startValue, endValue };
-    }
-    if (startDate > endDate) {
-      return { startValue, endValue: startValue };
-    }
-    return { startValue, endValue };
-  };
+  const handleLoadPreviousResults = useCallback(async () => {
+    setIsRunning(true);
+    setProgress(0);
+    setProgressLabel('');
+    setStageLabel('');
+    shouldAutoLoadResultsRef.current = false;
 
-  const handleDateStartChange = (value) => {
-    if (!value) {
-      setDateStart(null);
-      return;
-    }
-    const { startValue, endValue } = ensureOrderedRange(value, dateEnd);
-    setDateStart(startValue);
-    setDateEnd(endValue);
-  };
+    const baseFilters = {
+      subcategories: selectedCategories,
+      date_start: useDateRange ? dateStart : null,
+      date_end: useDateRange ? dateEnd : null,
+    };
 
-  const handleDateEndChange = (value) => {
-    if (!value) {
-      setDateEnd(null);
-      return;
+    setLastFilters(baseFilters);
+
+    const success = await loadLatestResults(baseFilters);
+    if (success) {
+      setProgress(100);
+      setProgressLabel('✅ Hotovo!');
     }
-    const { startValue, endValue } = ensureOrderedRange(dateStart, value);
-    setDateStart(startValue);
-    setDateEnd(endValue);
-  };
+    setIsRunning(false);
+  }, [dateEnd, dateStart, loadLatestResults, selectedCategories, useDateRange]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -266,7 +351,7 @@ export default function HomeScreen() {
             />
             <PrimaryButton
               title="Predchádzajúce výsledky"
-              onPress={() => startScrape('old')}
+              onPress={handleLoadPreviousResults}
               disabled={isRunning}
               style={[{ flex: 1, backgroundColor: '#3b82f6' }]}
             />
@@ -331,8 +416,7 @@ export default function HomeScreen() {
         onToggleCategory={toggleCategory}
         dateStart={dateStart}
         dateEnd={dateEnd}
-        onDateStartChange={handleDateStartChange}
-        onDateEndChange={handleDateEndChange}
+        onDateRangeChange={handleDateRangeChange}
         newOnly={newOnly}
         onNewOnly={handleNewOnlyToggle}
         onClose={() => setShowFilters(false)}
