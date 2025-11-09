@@ -3,11 +3,11 @@ import { View, Text, StyleSheet } from 'react-native';
 export function ProgressBar({ progress, label, stageLabel }) {
   return (
     <View style={styles.container}>
-      {label && <Text style={styles.label}>{label}</Text>}
+      {stageLabel ? <Text style={styles.stageLabel}>{stageLabel}</Text> : null}
       <View style={styles.progressOuter}>
         <View style={[styles.progressFill, { width: `${progress}%` }]} />
       </View>
-      {stageLabel && <Text style={styles.stageLabel}>{stageLabel}</Text>}
+      {label ? <Text style={styles.label}>{label}</Text> : null}
     </View>
   );
 }
@@ -15,12 +15,6 @@ export function ProgressBar({ progress, label, stageLabel }) {
 const styles = StyleSheet.create({
   container: {
     marginVertical: 16,
-  },
-  label: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 8,
-    color: '#1f2937',
   },
   progressOuter: {
     height: 16,
@@ -35,7 +29,13 @@ const styles = StyleSheet.create({
   },
   stageLabel: {
     fontSize: 12,
+    color: '#4b5563',
+    marginBottom: 6,
+    fontWeight: '600',
+  },
+  label: {
+    fontSize: 12,
     color: '#6b7280',
-    marginTop: 8,
+    marginTop: 6,
   },
 });
