@@ -28,6 +28,8 @@ export default function HomeScreen() {
   const [showFilters, setShowFilters] = useState(false);
   const [selectedCategories, setSelectedCategories] = useState([]);
   const [newOnly, setNewOnly] = useState(false);
+  const [dateStart, setDateStart] = useState(null);
+  const [dateEnd, setDateEnd] = useState(null);
   const [isRunning, setIsRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [progressLabel, setProgressLabel] = useState('');
@@ -87,10 +89,11 @@ export default function HomeScreen() {
       setStageLabel('');
       setResults([]);
 
+      const useDateRange = !newOnly && dateStart && dateEnd;
       const filters = {
         subcategories: selectedCategories,
-        date_start: newOnly ? null : null,
-        date_end: newOnly ? null : null,
+        date_start: useDateRange ? dateStart : null,
+        date_end: useDateRange ? dateEnd : null,
         mode: mode,
       };
 
@@ -182,6 +185,49 @@ export default function HomeScreen() {
       if (progressInterval) clearInterval(progressInterval);
     };
   }, []);
+
+  const handleNewOnlyToggle = (value) => {
+    setNewOnly(value);
+    if (value) {
+      setDateStart(null);
+      setDateEnd(null);
+    }
+  };
+
+  const ensureOrderedRange = (startValue, endValue) => {
+    if (!startValue && !endValue) return { startValue, endValue };
+    if (!startValue && endValue) return { startValue: endValue, endValue };
+    if (startValue && !endValue) return { startValue, endValue: startValue };
+    const startDate = new Date(`${startValue}T00:00:00`);
+    const endDate = new Date(`${endValue}T00:00:00`);
+    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+      return { startValue, endValue };
+    }
+    if (startDate > endDate) {
+      return { startValue, endValue: startValue };
+    }
+    return { startValue, endValue };
+  };
+
+  const handleDateStartChange = (value) => {
+    if (!value) {
+      setDateStart(null);
+      return;
+    }
+    const { startValue, endValue } = ensureOrderedRange(value, dateEnd);
+    setDateStart(startValue);
+    setDateEnd(endValue);
+  };
+
+  const handleDateEndChange = (value) => {
+    if (!value) {
+      setDateEnd(null);
+      return;
+    }
+    const { startValue, endValue } = ensureOrderedRange(dateStart, value);
+    setDateStart(startValue);
+    setDateEnd(endValue);
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -283,8 +329,12 @@ export default function HomeScreen() {
         categories={categories}
         selectedCategories={selectedCategories}
         onToggleCategory={toggleCategory}
+        dateStart={dateStart}
+        dateEnd={dateEnd}
+        onDateStartChange={handleDateStartChange}
+        onDateEndChange={handleDateEndChange}
         newOnly={newOnly}
-        onNewOnly={setNewOnly}
+        onNewOnly={handleNewOnlyToggle}
         onClose={() => setShowFilters(false)}
       />
     </SafeAreaView>

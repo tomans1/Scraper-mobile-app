@@ -1,4 +1,14 @@
-import { View, Text, ScrollView, StyleSheet, Switch, Pressable } from 'react-native';
+import { useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Pressable,
+  TextInput,
+  Alert,
+} from 'react-native';
 import { SecondaryButton } from './PrimaryButton';
 
 export function FiltersDrawer({
@@ -8,11 +18,50 @@ export function FiltersDrawer({
   onToggleCategory,
   dateStart,
   dateEnd,
+  onDateStartChange,
+  onDateEndChange,
   onNewOnly,
   newOnly,
   onClose,
 }) {
   if (!visible) return null;
+
+  const [startValue, setStartValue] = useState('');
+  const [endValue, setEndValue] = useState('');
+
+  useEffect(() => {
+    setStartValue(dateStart ? formatDisplayDate(dateStart) : '');
+    setEndValue(dateEnd ? formatDisplayDate(dateEnd) : '');
+  }, [dateStart, dateEnd, visible]);
+
+  const handleDateCommit = (value, onChange, fallback, setValue) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      onChange(null);
+      setValue('');
+      return;
+    }
+
+    const normalized = parseDateInput(trimmed);
+    if (!normalized) {
+      Alert.alert(
+        'Neplatný dátum',
+        'Použite formát DD/MM/YYYY alebo YYYY-MM-DD.'
+      );
+      setValue(fallback ? formatDisplayDate(fallback) : '');
+      return;
+    }
+
+    onChange(normalized);
+    setValue(formatDisplayDate(normalized));
+  };
+
+  const handleClearDates = () => {
+    onDateStartChange(null);
+    onDateEndChange(null);
+    setStartValue('');
+    setEndValue('');
+  };
 
   return (
     <View style={styles.overlay}>
@@ -56,6 +105,70 @@ export function FiltersDrawer({
               <Text style={styles.label}>Iba nové inzeráty</Text>
               <Switch value={newOnly} onValueChange={onNewOnly} />
             </View>
+            <Text style={styles.helperText}>
+              Ak je zapnuté, zobrazia sa len najnovšie inzeráty a rozsah dátumov
+              sa nepoužije.
+            </Text>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.label}>Dátum pridania inzerátu</Text>
+            <Text style={styles.helperText}>
+              Vyplňte oba dátumy vo formáte DD/MM/YYYY alebo YYYY-MM-DD.
+            </Text>
+            <View style={styles.dateInputsRow}>
+              <View style={styles.dateInputGroup}>
+                <Text style={styles.dateInputLabel}>Od</Text>
+                <TextInput
+                  style={[styles.dateInput, newOnly && styles.dateInputDisabled]}
+                  value={startValue}
+                  onChangeText={setStartValue}
+                  onEndEditing={(e) =>
+                    handleDateCommit(
+                      e.nativeEvent.text,
+                      onDateStartChange,
+                      dateStart,
+                      setStartValue
+                    )
+                  }
+                  placeholder="DD/MM/YYYY"
+                  editable={!newOnly}
+                  keyboardType="numbers-and-punctuation"
+                  returnKeyType="done"
+                />
+              </View>
+              <View style={styles.dateInputGroup}>
+                <Text style={styles.dateInputLabel}>Do</Text>
+                <TextInput
+                  style={[styles.dateInput, newOnly && styles.dateInputDisabled]}
+                  value={endValue}
+                  onChangeText={setEndValue}
+                  onEndEditing={(e) =>
+                    handleDateCommit(
+                      e.nativeEvent.text,
+                      onDateEndChange,
+                      dateEnd,
+                      setEndValue
+                    )
+                  }
+                  placeholder="DD/MM/YYYY"
+                  editable={!newOnly}
+                  keyboardType="numbers-and-punctuation"
+                  returnKeyType="done"
+                />
+              </View>
+            </View>
+            <Pressable
+              onPress={handleClearDates}
+              disabled={newOnly || (!dateStart && !dateEnd)}
+              style={[styles.clearButton, (newOnly || (!dateStart && !dateEnd)) && styles.clearButtonDisabled]}
+            >
+              <Text
+                style={[styles.clearButtonText, (newOnly || (!dateStart && !dateEnd)) && styles.clearButtonTextDisabled]}
+              >
+                Vymazať dátumy
+              </Text>
+            </Pressable>
           </View>
         </ScrollView>
 
@@ -65,6 +178,70 @@ export function FiltersDrawer({
       </View>
     </View>
   );
+}
+
+function formatDisplayDate(value) {
+  if (!value) return '';
+  const [year, month, day] = value.split('-');
+  if (!year || !month || !day) return value;
+  return `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${year}`;
+}
+
+function parseDateInput(value) {
+  if (!value) return null;
+  const normalized = value
+    .trim()
+    .replace(/\./g, '-')
+    .replace(/\//g, '-')
+    .replace(/\s+/g, '-');
+  const parts = normalized.split('-').filter(Boolean);
+  if (parts.length !== 3) {
+    return null;
+  }
+
+  let year;
+  let month;
+  let day;
+
+  if (parts[0].length === 4) {
+    [year, month, day] = parts;
+  } else {
+    [day, month, year] = parts;
+    if (year && year.length === 2) {
+      year = `20${year}`;
+    }
+  }
+
+  if (!year || !month || !day) {
+    return null;
+  }
+
+  const parsedYear = Number(year);
+  const parsedMonth = Number(month);
+  const parsedDay = Number(day);
+
+  if (
+    Number.isNaN(parsedYear) ||
+    Number.isNaN(parsedMonth) ||
+    Number.isNaN(parsedDay) ||
+    parsedMonth < 1 ||
+    parsedMonth > 12 ||
+    parsedDay < 1 ||
+    parsedDay > 31
+  ) {
+    return null;
+  }
+
+  const date = new Date(parsedYear, parsedMonth - 1, parsedDay);
+  if (
+    date.getFullYear() !== parsedYear ||
+    date.getMonth() !== parsedMonth - 1 ||
+    date.getDate() !== parsedDay
+  ) {
+    return null;
+  }
+
+  return `${parsedYear.toString().padStart(4, '0')}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
 }
 
 const styles = StyleSheet.create({
@@ -148,6 +325,56 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  helperText: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginTop: 4,
+  },
+  dateInputsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 12,
+  },
+  dateInputGroup: {
+    flex: 1,
+  },
+  dateInputLabel: {
+    fontSize: 12,
+    color: '#4b5563',
+    marginBottom: 4,
+  },
+  dateInput: {
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    fontSize: 14,
+    color: '#1f2937',
+  },
+  dateInputDisabled: {
+    backgroundColor: '#f3f4f6',
+    color: '#9ca3af',
+  },
+  clearButton: {
+    marginTop: 12,
+    alignSelf: 'flex-start',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#e5e7eb',
+  },
+  clearButtonDisabled: {
+    opacity: 0.5,
+  },
+  clearButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1f2937',
+  },
+  clearButtonTextDisabled: {
+    color: '#6b7280',
   },
   footer: {
     padding: 16,
