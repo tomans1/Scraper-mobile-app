@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -6,10 +6,9 @@ import {
   StyleSheet,
   Switch,
   Pressable,
-  TextInput,
-  Alert,
+  Modal,
 } from 'react-native';
-import { SecondaryButton } from './PrimaryButton';
+import { PrimaryButton, SecondaryButton } from './PrimaryButton';
 
 export function FiltersDrawer({
   visible,
@@ -24,44 +23,99 @@ export function FiltersDrawer({
   newOnly,
   onClose,
 }) {
-  if (!visible) return null;
+  const [isCalendarVisible, setIsCalendarVisible] = useState(false);
+  const [tempStart, setTempStart] = useState(null);
+  const [tempEnd, setTempEnd] = useState(null);
+  const [currentMonth, setCurrentMonth] = useState(() =>
+    getInitialMonth(dateStart, dateEnd)
+  );
 
-  const [startValue, setStartValue] = useState('');
-  const [endValue, setEndValue] = useState('');
+  const startValue = useMemo(
+    () => (dateStart ? formatDisplayDate(dateStart) : ''),
+    [dateStart]
+  );
+  const endValue = useMemo(
+    () => (dateEnd ? formatDisplayDate(dateEnd) : ''),
+    [dateEnd]
+  );
 
   useEffect(() => {
-    setStartValue(dateStart ? formatDisplayDate(dateStart) : '');
-    setEndValue(dateEnd ? formatDisplayDate(dateEnd) : '');
-  }, [dateStart, dateEnd, visible]);
+    if (!visible) {
+      setIsCalendarVisible(false);
+    }
+  }, [visible]);
 
-  const handleDateCommit = (value, onChange, fallback, setValue) => {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      onChange(null);
-      setValue('');
+  useEffect(() => {
+    if (isCalendarVisible) {
+      setTempStart(dateStart);
+      setTempEnd(dateEnd);
+      setCurrentMonth(getInitialMonth(dateStart, dateEnd));
+    }
+  }, [isCalendarVisible, dateStart, dateEnd]);
+
+  useEffect(() => {
+    if (newOnly) {
+      setIsCalendarVisible(false);
+    }
+  }, [newOnly]);
+
+  const openCalendar = () => {
+    if (newOnly) return;
+    setTempStart(dateStart);
+    setTempEnd(dateEnd);
+    setCurrentMonth(getInitialMonth(dateStart, dateEnd));
+    setIsCalendarVisible(true);
+  };
+
+  const handleDayPress = (dateString) => {
+    if (!tempStart || (tempStart && tempEnd)) {
+      setTempStart(dateString);
+      setTempEnd(null);
       return;
     }
 
-    const normalized = parseDateInput(trimmed);
-    if (!normalized) {
-      Alert.alert(
-        'Neplatný dátum',
-        'Použite formát DD/MM/YYYY alebo YYYY-MM-DD.'
-      );
-      setValue(fallback ? formatDisplayDate(fallback) : '');
+    if (dateString < tempStart) {
+      setTempStart(dateString);
+      setTempEnd(null);
       return;
     }
 
-    onChange(normalized);
-    setValue(formatDisplayDate(normalized));
+    setTempEnd(dateString);
+  };
+
+  const handleConfirmRange = () => {
+    if (!tempStart || !tempEnd) return;
+    onDateStartChange(tempStart);
+    onDateEndChange(tempEnd);
+    setIsCalendarVisible(false);
+  };
+
+  const handleCancelRange = () => {
+    setIsCalendarVisible(false);
   };
 
   const handleClearDates = () => {
     onDateStartChange(null);
     onDateEndChange(null);
-    setStartValue('');
-    setEndValue('');
+    setTempStart(null);
+    setTempEnd(null);
   };
+
+  const goToPreviousMonth = () => {
+    setCurrentMonth((prev) => shiftMonth(prev, -1));
+  };
+
+  const goToNextMonth = () => {
+    setCurrentMonth((prev) => shiftMonth(prev, 1));
+  };
+
+  const monthDays = useMemo(
+    () => generateMonthDays(currentMonth.year, currentMonth.month),
+    [currentMonth]
+  );
+  const monthLabel = formatMonthLabel(currentMonth.year, currentMonth.month);
+
+  if (!visible) return null;
 
   return (
     <View style={styles.overlay}>
@@ -114,48 +168,52 @@ export function FiltersDrawer({
           <View style={styles.section}>
             <Text style={styles.label}>Dátum pridania inzerátu</Text>
             <Text style={styles.helperText}>
-              Vyplňte oba dátumy vo formáte DD/MM/YYYY alebo YYYY-MM-DD.
+              Vyberte dátumy z kalendára a označte rozsah, ktorý chcete použiť.
             </Text>
             <View style={styles.dateInputsRow}>
               <View style={styles.dateInputGroup}>
                 <Text style={styles.dateInputLabel}>Od</Text>
-                <TextInput
-                  style={[styles.dateInput, newOnly && styles.dateInputDisabled]}
-                  value={startValue}
-                  onChangeText={setStartValue}
-                  onEndEditing={(e) =>
-                    handleDateCommit(
-                      e.nativeEvent.text,
-                      onDateStartChange,
-                      dateStart,
-                      setStartValue
-                    )
-                  }
-                  placeholder="DD/MM/YYYY"
-                  editable={!newOnly}
-                  keyboardType="numbers-and-punctuation"
-                  returnKeyType="done"
-                />
+                <Pressable
+                  onPress={openCalendar}
+                  disabled={newOnly}
+                  style={[
+                    styles.dateDisplay,
+                    newOnly && styles.dateInputDisabled,
+                    startValue && styles.dateDisplaySelected,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.dateDisplayText,
+                      newOnly && styles.dateDisplayTextDisabled,
+                      startValue && styles.dateDisplayTextSelected,
+                    ]}
+                  >
+                    {startValue || 'DD/MM/YYYY'}
+                  </Text>
+                </Pressable>
               </View>
               <View style={styles.dateInputGroup}>
                 <Text style={styles.dateInputLabel}>Do</Text>
-                <TextInput
-                  style={[styles.dateInput, newOnly && styles.dateInputDisabled]}
-                  value={endValue}
-                  onChangeText={setEndValue}
-                  onEndEditing={(e) =>
-                    handleDateCommit(
-                      e.nativeEvent.text,
-                      onDateEndChange,
-                      dateEnd,
-                      setEndValue
-                    )
-                  }
-                  placeholder="DD/MM/YYYY"
-                  editable={!newOnly}
-                  keyboardType="numbers-and-punctuation"
-                  returnKeyType="done"
-                />
+                <Pressable
+                  onPress={openCalendar}
+                  disabled={newOnly}
+                  style={[
+                    styles.dateDisplay,
+                    newOnly && styles.dateInputDisabled,
+                    endValue && styles.dateDisplaySelected,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.dateDisplayText,
+                      newOnly && styles.dateDisplayTextDisabled,
+                      endValue && styles.dateDisplayTextSelected,
+                    ]}
+                  >
+                    {endValue || 'DD/MM/YYYY'}
+                  </Text>
+                </Pressable>
               </View>
             </View>
             <Pressable
@@ -176,6 +234,94 @@ export function FiltersDrawer({
           <SecondaryButton title="Zavrieť" onPress={onClose} />
         </View>
       </View>
+
+      <Modal
+        visible={isCalendarVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={handleCancelRange}
+      >
+        <View style={styles.calendarOverlay}>
+          <View style={styles.calendarContainer}>
+            <View style={styles.calendarHeader}>
+              <Pressable onPress={goToPreviousMonth} style={styles.calendarNavButton}>
+                <Text style={styles.calendarNavText}>‹</Text>
+              </Pressable>
+              <Text style={styles.calendarHeaderTitle}>{monthLabel}</Text>
+              <Pressable onPress={goToNextMonth} style={styles.calendarNavButton}>
+                <Text style={styles.calendarNavText}>›</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.weekRow}>
+              {WEEK_DAYS.map((day) => (
+                <Text key={day} style={styles.weekDayText}>
+                  {day}
+                </Text>
+              ))}
+            </View>
+
+            <View style={styles.daysGrid}>
+              {monthDays.map((day) => {
+                const dateString = day.dateString;
+                const isStart = tempStart && dateString === tempStart;
+                const isEnd = tempEnd && dateString === tempEnd;
+                const hasBoth = tempStart && tempEnd;
+                const isInRange =
+                  tempStart &&
+                  (!tempEnd
+                    ? dateString === tempStart
+                    : dateString >= tempStart && dateString <= tempEnd);
+                const isMiddle = hasBoth && isInRange && !isStart && !isEnd;
+
+                return (
+                  <Pressable
+                    key={day.key}
+                    disabled={!day.inMonth}
+                    onPress={() => handleDayPress(dateString)}
+                    style={[
+                      styles.dayCell,
+                      !day.inMonth && styles.dayCellMuted,
+                      isInRange && styles.dayCellInRange,
+                      isMiddle && styles.dayCellMiddle,
+                      isStart && styles.dayCellStart,
+                      isEnd && styles.dayCellEnd,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.dayCellText,
+                        !day.inMonth && styles.dayCellTextMuted,
+                        isInRange && styles.dayCellTextInRange,
+                        (isStart || isEnd) && styles.dayCellTextSelected,
+                      ]}
+                    >
+                      {day.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <View style={styles.calendarActions}>
+              <SecondaryButton
+                title="Zrušiť"
+                onPress={handleCancelRange}
+                style={styles.calendarActionButton}
+              />
+              <PrimaryButton
+                title="Potvrdiť"
+                onPress={handleConfirmRange}
+                disabled={!tempStart || !tempEnd}
+                style={[
+                  styles.calendarActionButton,
+                  (!tempStart || !tempEnd) && styles.confirmDisabled,
+                ]}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -187,61 +333,77 @@ function formatDisplayDate(value) {
   return `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${year}`;
 }
 
-function parseDateInput(value) {
-  if (!value) return null;
-  const normalized = value
-    .trim()
-    .replace(/\./g, '-')
-    .replace(/\//g, '-')
-    .replace(/\s+/g, '-');
-  const parts = normalized.split('-').filter(Boolean);
-  if (parts.length !== 3) {
-    return null;
+const WEEK_DAYS = ['Po', 'Ut', 'St', 'Št', 'Pi', 'So', 'Ne'];
+const MONTH_NAMES = [
+  'január',
+  'február',
+  'marec',
+  'apríl',
+  'máj',
+  'jún',
+  'júl',
+  'august',
+  'september',
+  'október',
+  'november',
+  'december',
+];
+
+function formatMonthLabel(year, month) {
+  const safeMonth = Math.min(Math.max(month, 0), 11);
+  return `${MONTH_NAMES[safeMonth]} ${year}`;
+}
+
+function pad(number) {
+  return number.toString().padStart(2, '0');
+}
+
+function formatISODate(date) {
+  const year = date.getFullYear();
+  const month = pad(date.getMonth() + 1);
+  const day = pad(date.getDate());
+  return `${year}-${month}-${day}`;
+}
+
+function generateMonthDays(year, month) {
+  const firstDay = new Date(year, month, 1);
+  const startOffset = (firstDay.getDay() + 6) % 7; // Monday as first day
+  const totalCells = 42;
+  const days = [];
+  for (let index = 0; index < totalCells; index += 1) {
+    const dayOffset = index - startOffset + 1;
+    const date = new Date(year, month, dayOffset);
+    const inMonth = date.getMonth() === month;
+    const dateString = formatISODate(date);
+    days.push({
+      key: `${dateString}-${index}`,
+      label: String(date.getDate()),
+      dateString,
+      inMonth,
+    });
   }
+  return days;
+}
 
-  let year;
-  let month;
-  let day;
-
-  if (parts[0].length === 4) {
-    [year, month, day] = parts;
-  } else {
-    [day, month, year] = parts;
-    if (year && year.length === 2) {
-      year = `20${year}`;
-    }
+function getInitialMonth(start, end) {
+  const base = start || end || formatISODate(new Date());
+  if (!base) {
+    const today = new Date();
+    return { year: today.getFullYear(), month: today.getMonth() };
   }
-
-  if (!year || !month || !day) {
-    return null;
-  }
-
+  const [year, month] = base.split('-');
   const parsedYear = Number(year);
   const parsedMonth = Number(month);
-  const parsedDay = Number(day);
-
-  if (
-    Number.isNaN(parsedYear) ||
-    Number.isNaN(parsedMonth) ||
-    Number.isNaN(parsedDay) ||
-    parsedMonth < 1 ||
-    parsedMonth > 12 ||
-    parsedDay < 1 ||
-    parsedDay > 31
-  ) {
-    return null;
+  if (Number.isNaN(parsedYear) || Number.isNaN(parsedMonth)) {
+    const today = new Date();
+    return { year: today.getFullYear(), month: today.getMonth() };
   }
+  return { year: parsedYear, month: parsedMonth - 1 };
+}
 
-  const date = new Date(parsedYear, parsedMonth - 1, parsedDay);
-  if (
-    date.getFullYear() !== parsedYear ||
-    date.getMonth() !== parsedMonth - 1 ||
-    date.getDate() !== parsedDay
-  ) {
-    return null;
-  }
-
-  return `${parsedYear.toString().padStart(4, '0')}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+function shiftMonth(current, delta) {
+  const date = new Date(current.year, current.month + delta, 1);
+  return { year: date.getFullYear(), month: date.getMonth() };
 }
 
 const styles = StyleSheet.create({
@@ -344,18 +506,33 @@ const styles = StyleSheet.create({
     color: '#4b5563',
     marginBottom: 4,
   },
-  dateInput: {
+  dateDisplay: {
     borderWidth: 1,
     borderColor: '#d1d5db',
     borderRadius: 8,
-    paddingVertical: 8,
+    paddingVertical: 12,
     paddingHorizontal: 12,
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+  },
+  dateDisplaySelected: {
+    borderColor: '#3b82f6',
+    backgroundColor: '#eff6ff',
+  },
+  dateDisplayText: {
     fontSize: 14,
+    color: '#9ca3af',
+  },
+  dateDisplayTextSelected: {
     color: '#1f2937',
+    fontWeight: '600',
+  },
+  dateDisplayTextDisabled: {
+    color: '#d1d5db',
   },
   dateInputDisabled: {
     backgroundColor: '#f3f4f6',
-    color: '#9ca3af',
+    opacity: 0.7,
   },
   clearButton: {
     marginTop: 12,
@@ -380,5 +557,108 @@ const styles = StyleSheet.create({
     padding: 16,
     borderTopWidth: 1,
     borderTopColor: '#e5e7eb',
+  },
+  calendarOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  calendarContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    width: '100%',
+    maxWidth: 360,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  calendarHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  calendarNavButton: {
+    padding: 8,
+  },
+  calendarNavText: {
+    fontSize: 20,
+    color: '#1f2937',
+  },
+  calendarHeaderTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1f2937',
+  },
+  weekRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  weekDayText: {
+    width: `${100 / 7}%`,
+    textAlign: 'center',
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#6b7280',
+  },
+  daysGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginHorizontal: -2,
+  },
+  dayCell: {
+    width: `${100 / 7}%`,
+    paddingVertical: 10,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 2,
+  },
+  dayCellInRange: {
+    backgroundColor: '#dbeafe',
+  },
+  dayCellMiddle: {
+    borderRadius: 12,
+  },
+  dayCellStart: {
+    backgroundColor: '#3b82f6',
+  },
+  dayCellEnd: {
+    backgroundColor: '#3b82f6',
+  },
+  dayCellMuted: {
+    opacity: 0.4,
+  },
+  dayCellText: {
+    fontSize: 13,
+    color: '#1f2937',
+    fontWeight: '500',
+  },
+  dayCellTextInRange: {
+    color: '#1d4ed8',
+  },
+  dayCellTextMuted: {
+    color: '#6b7280',
+  },
+  dayCellTextSelected: {
+    color: '#fff',
+  },
+  calendarActions: {
+    marginTop: 16,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  calendarActionButton: {
+    flex: 1,
+  },
+  confirmDisabled: {
+    backgroundColor: '#d1d5db',
   },
 });
