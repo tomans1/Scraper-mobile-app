@@ -1,12 +1,22 @@
 import { View, Text, StyleSheet } from 'react-native';
 
-export function ProgressBar({ progress, label, stageLabel }) {
+export function ProgressBar({ progress = 0, label, stageLabel }) {
+  const clampedProgress = Math.max(0, Math.min(100, progress || 0));
+  const showBar = clampedProgress > 0;
+  const showContainer = showBar || !!label || !!stageLabel;
+
+  if (!showContainer) {
+    return null;
+  }
+
   return (
     <View style={styles.container}>
       {stageLabel ? <Text style={styles.stageLabel}>{stageLabel}</Text> : null}
-      <View style={styles.progressOuter}>
-        <View style={[styles.progressFill, { width: `${progress}%` }]} />
-      </View>
+      {showBar ? (
+        <View style={styles.progressOuter}>
+          <View style={[styles.progressFill, { width: `${clampedProgress}%` }]} />
+        </View>
+      ) : null}
       {label ? <Text style={styles.label}>{label}</Text> : null}
     </View>
   );
