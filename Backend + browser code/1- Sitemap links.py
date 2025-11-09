@@ -2,6 +2,9 @@ import os
 import random
 import time
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Tuple
+import threading
 
 from bs4 import BeautifulSoup
 from tqdm import tqdm
@@ -15,6 +18,7 @@ from http_client import HEADERS_POOL, new_scraper_session
 SITEMAP_INDEX = "https://reality.bazos.sk/sitemap.php"
 DEFAULT_PROGRESS_URL = "http://127.0.0.1:5000/progress_update"
 PROGRESS_URL = os.getenv("PROGRESS_URL", DEFAULT_PROGRESS_URL)
+PHASE_LABEL = "1/5 – Zbieram sitemapy"
 
 # === FILE DIRECTORY ===
 DATA_DIR = "Data"
@@ -28,10 +32,13 @@ OLD_FILE = os.path.join(DATA_DIR, "old_results.txt")
 NEW_FILE = os.path.join(DATA_DIR, "new_links.txt")
 
 DELAY_SECONDS = 0
+REQUEST_TIMEOUT = 20
+MAX_RETRIES = 3
+RETRY_BACKOFFS = (1.5, 3.0, 5.0)
 
 # Main scraper functions
 def get_sitemap_pages(session):
-    resp = session.get(SITEMAP_INDEX, headers=random.choice(HEADERS_POOL), timeout=25)
+    resp = session.get(SITEMAP_INDEX, headers=random.choice(HEADERS_POOL), timeout=REQUEST_TIMEOUT)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "xml")
     sitemap_urls = [loc.text for loc in soup.find_all("loc")]
@@ -39,7 +46,7 @@ def get_sitemap_pages(session):
 
 def get_ad_entries(sitemap_url, session):
     time.sleep(DELAY_SECONDS)
-    resp = session.get(sitemap_url, headers=random.choice(HEADERS_POOL), timeout=25)
+    resp = session.get(sitemap_url, headers=random.choice(HEADERS_POOL), timeout=REQUEST_TIMEOUT)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "xml")
     entries = []
@@ -86,6 +93,29 @@ def compare_links(old_file, new_file, output_file):
 if __name__ == "__main__":
     from storage import save_old_links  # <-- add this import so we can push to GitHub
 
+    def fetch_with_retries(index: int, sitemap_url: str) -> Tuple[int, List[Tuple[str, str]]]:
+        last_error = None
+        for attempt in range(1, MAX_RETRIES + 1):
+            session = new_scraper_session(verify_ssl=False)
+            try:
+                entries = get_ad_entries(sitemap_url, session)
+                return index, entries
+            except Exception as exc:  # noqa: PERF203 - retries require generic catch
+                last_error = exc
+                wait_time = RETRY_BACKOFFS[min(attempt - 1, len(RETRY_BACKOFFS) - 1)]
+                print(
+                    f"Retry {attempt}/{MAX_RETRIES} for {sitemap_url} failed: {exc}. "
+                    f"Waiting {wait_time:.1f}s before next attempt."
+                )
+                if attempt < MAX_RETRIES:
+                    time.sleep(wait_time)
+            finally:
+                try:
+                    session.close()
+                except Exception:
+                    pass
+        raise RuntimeError(f"Failed to fetch {sitemap_url} after {MAX_RETRIES} attempts: {last_error}")
+
     # Step 1: Backup old acquired links
     if os.path.exists(ACQUIRED_FILE):
         with open(ACQUIRED_FILE, "r", encoding="utf-8") as src:
@@ -102,34 +132,70 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Failed to fetch sitemap index: {e}")
         raise SystemExit(1)
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+    total = len(sitemap_pages)
+    if total != 13:
+        print(f"Unexpected number of sitemap pages: {total}. Expected 13.")
+        raise SystemExit(1)
 
     print("Scraping ad URLs and formatted dates from sitemaps...")
     all_entries = []
-    total = len(sitemap_pages)
     # Notify backend about total sitemaps
     try:
         requests.post(
             PROGRESS_URL,
-            json={"phase": "1/5 Zber sitemap", "done": 0, "total": total},
+            json={"phase": PHASE_LABEL, "done": 0, "total": total},
             timeout=3,
         )
     except Exception:
         pass
 
-    for idx, page in enumerate(tqdm(sitemap_pages, bar_format="{n_fmt}/{total_fmt} sitemaps"), 1):
-        try:
-            entries = get_ad_entries(page, session)
-            all_entries.extend(entries)
-        except Exception as e:
-            print(f"Failed to fetch {page}: {e}")
-        try:
-            requests.post(
-                PROGRESS_URL,
-                json={"phase": "1/5 Zber sitemap", "done": idx, "total": total},
-                timeout=3,
-            )
-        except Exception:
-            pass
+    progress_lock = threading.Lock()
+    completed = 0
+    results_buffer: List[List[Tuple[str, str]]] = [[] for _ in sitemap_pages]
+    errors = []
+
+    with ThreadPoolExecutor(max_workers=min(6, total)) as executor:
+        future_map = {
+            executor.submit(fetch_with_retries, idx, page): (idx, page)
+            for idx, page in enumerate(sitemap_pages)
+        }
+
+        with tqdm(total=total, bar_format="{n_fmt}/{total_fmt} sitemaps") as progress_bar:
+            for future in as_completed(future_map):
+                idx, page = future_map[future]
+                try:
+                    original_index, entries = future.result()
+                    results_buffer[original_index] = entries
+                except Exception as exc:  # noqa: PERF203 - aggregated handling required
+                    errors.append((page, exc))
+                finally:
+                    with progress_lock:
+                        completed += 1
+                        progress_bar.update(1)
+                        try:
+                            requests.post(
+                                PROGRESS_URL,
+                                json={"phase": PHASE_LABEL, "done": completed, "total": total},
+                                timeout=3,
+                            )
+                        except Exception:
+                            pass
+
+    if errors:
+        print("\nErrors during sitemap fetching:")
+        for page, exc in errors:
+            print(f" - {page}: {exc}")
+        print("Nepodarilo sa načítať všetky sitemap súbory – zber bol zastavený.")
+        raise SystemExit(1)
+
+    for bucket in results_buffer:
+        all_entries.extend(bucket)
 
     print(f"\nTotal ad entries scraped: {len(all_entries)}")
 
@@ -142,7 +208,7 @@ if __name__ == "__main__":
     try:
         requests.post(
             PROGRESS_URL,
-            json={"phase": "1/5 Zber sitemap", "done": total, "total": total},
+            json={"phase": PHASE_LABEL, "done": total, "total": total},
             timeout=3,
         )
     except Exception:

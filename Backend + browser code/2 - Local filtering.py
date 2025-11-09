@@ -77,7 +77,7 @@ steps_total = 4
 try:
     requests.post(
         PROGRESS_URL,
-        json={"phase": "2/5 Prvé filtrovanie", "done": 0, "total": steps_total},
+            json={"phase": "2/5 – Prvé filtrovanie", "done": 0, "total": steps_total},
         timeout=3,
     )
 except Exception:
@@ -97,7 +97,7 @@ for slug in tqdm(slugs, desc="Step 1: Filtering Agencies"):
 try:
     requests.post(
         PROGRESS_URL,
-        json={"phase": "2/5 Prvé filtrovanie", "done": 1, "total": steps_total},
+            json={"phase": "2/5 – Prvé filtrovanie", "done": 1, "total": steps_total},
         timeout=3,
     )
 except Exception:
@@ -143,7 +143,7 @@ for slug, _ in tqdm(non_agency_links + agency_links, desc="Step 2: Scoring Agenc
 try:
     requests.post(
         PROGRESS_URL,
-        json={"phase": "2/5 Prvé filtrovanie", "done": 2, "total": steps_total},
+            json={"phase": "2/5 – Prvé filtrovanie", "done": 2, "total": steps_total},
         timeout=3,
     )
 except Exception:
@@ -162,7 +162,7 @@ for slug, tokens in tqdm(post_agency_links, desc="Step 3: Filtering Rentals and 
 try:
     requests.post(
         PROGRESS_URL,
-        json={"phase": "2/5 Prvé filtrovanie", "done": 3, "total": steps_total},
+            json={"phase": "2/5 – Prvé filtrovanie", "done": 3, "total": steps_total},
         timeout=3,
     )
 except Exception:
@@ -208,7 +208,7 @@ for slug, _ in tqdm(sale_links + non_sale_links, desc="Step 4: Final Scoring"):
 try:
     requests.post(
         PROGRESS_URL,
-        json={"phase": "2/5 Prvé filtrovanie", "done": 4, "total": steps_total},
+            json={"phase": "2/5 – Prvé filtrovanie", "done": 4, "total": steps_total},
         timeout=3,
     )
 except Exception:

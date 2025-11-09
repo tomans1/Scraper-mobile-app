@@ -70,11 +70,11 @@ def tokenize(text):
 ads = extract_blocks(INPUT_FILE)
 total = len(ads)
 try:
-    requests.post(
-        PROGRESS_URL,
-        json={"phase": "4/5 Filtrovanie popisov", "done": 0, "total": total},
-        timeout=3,
-    )
+        requests.post(
+            PROGRESS_URL,
+            json={"phase": "4/5 – Filtrovanie podľa popisu", "done": 0, "total": total},
+            timeout=3,
+        )
 except Exception:
     pass
 
@@ -132,11 +132,11 @@ for idx, ad in enumerate(tqdm(ads, desc="Filtering ads"), 1):
     else:
         final_ads.append(ad)
     try:
-        requests.post(
-            PROGRESS_URL,
-            json={"phase": "4/5 Filtrovanie popisov", "done": idx, "total": total},
-            timeout=3,
-        )
+                requests.post(
+                    PROGRESS_URL,
+                    json={"phase": "4/5 – Filtrovanie podľa popisu", "done": idx, "total": total},
+                    timeout=3,
+                )
     except Exception:
         pass
 
@@ -203,10 +203,10 @@ print(f"- Removed Ads (with reasons): {REMOVED_FILE}")
 print(f"- Suggestions: {SUGGESTIONS_FILE}")
 print(f"- Primary Keywords (untouched): {KEYWORDS_FILE}")
 try:
-    requests.post(
-        PROGRESS_URL,
-        json={"phase": "4/5 Filtrovanie popisov", "done": total, "total": total},
-        timeout=3,
-    )
+        requests.post(
+            PROGRESS_URL,
+            json={"phase": "4/5 – Filtrovanie podľa popisu", "done": total, "total": total},
+            timeout=3,
+        )
 except Exception:
     pass

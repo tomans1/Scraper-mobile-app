@@ -33,6 +33,13 @@ export async function fetchResults(filters) {
   });
 }
 
+export async function fetchLatestResults(filters) {
+  return apiRequest('/scrape', {
+    method: 'POST',
+    body: JSON.stringify({ ...filters, mode: 'latest' }),
+  });
+}
+
 export async function getJobStatus() {
   return apiRequest('/job_status');
 }

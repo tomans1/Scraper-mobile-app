@@ -121,7 +121,7 @@ def main():
     try:
         requests.post(
             PROGRESS_URL,
-            json={"phase": "3/5 Sťahovanie inzerátov", "done": 0, "total": total_ads},
+            json={"phase": "3/5 – HTML filtrácia", "done": 0, "total": total_ads},
             timeout=3,
         )
     except Exception:
@@ -155,7 +155,7 @@ def main():
             try:
                 requests.post(
                     PROGRESS_URL,
-                    json={"phase": "3/5 Sťahovanie inzerátov", "done": i, "total": total_ads},
+                    json={"phase": "3/5 – HTML filtrácia", "done": i, "total": total_ads},
                     timeout=3,
                 )
             except Exception:
@@ -166,7 +166,7 @@ def main():
     try:
         requests.post(
             PROGRESS_URL,
-            json={"phase": "3/5 Sťahovanie inzerátov", "done": total_ads, "total": total_ads},
+            json={"phase": "3/5 – HTML filtrácia", "done": total_ads, "total": total_ads},
             timeout=3,
         )
     except Exception:
