@@ -70,6 +70,7 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 12,
     fontWeight: '500',
+    minWidth: 96,
   },
   wakeButton: {
     paddingHorizontal: 8,

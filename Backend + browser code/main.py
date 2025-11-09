@@ -48,6 +48,11 @@ class ProgressFilter(logging.Filter):
         # Suppress only "/progress" route from werkzeug logs
         return "/progress" not in record.getMessage()
 
+# Dedicated exception for sitemap collection failures so we can
+# propagate a clear error back to the UI.
+class SitemapCollectionError(RuntimeError):
+    pass
+
 # Apply filter to werkzeug logger
 logging.getLogger("werkzeug").addFilter(ProgressFilter())
 
@@ -405,6 +410,29 @@ def _parse_date(s: str):
             continue
     return None
 
+
+def _filter_results_by_params(results, subcats, start_date, end_date):
+    filtered = []
+
+    d1 = _parse_date(start_date) if start_date else None
+    d2 = _parse_date(end_date)   if end_date   else None
+
+    for res in results:
+        if subcats and res.get("subcat", "").strip() not in subcats:
+            continue
+        if d1 and d2:
+            ad_date = res.get("date")
+            if ad_date and not (d1 <= ad_date.date() <= d2):
+                continue
+
+        filtered.append({
+            "url": res.get("url"),
+            "subcat": res.get("subcat", ""),
+            "date": res.get("date").strftime("%d/%m/%Y %H:%M") if res.get("date") else "",
+        })
+
+    return filtered
+
 @app.route("/scrape", methods=["POST"])
 @require_auth
 def scrape():
@@ -418,6 +446,9 @@ def scrape():
 
     if mode == "old":
         results = fetch_previous_results(subcats, date_start, date_end)
+        return jsonify(results)
+    if mode == "latest":
+        results = fetch_latest_results(subcats, date_start, date_end)
         return jsonify(results)
 
     current_state = get_job_state()
@@ -467,6 +498,14 @@ def _run_scrape_job(payload):
             error=None,
             last_count=len(results),
         )
+    except SitemapCollectionError as e:
+        logging.error("Sitemap collection failed: %s", e)
+        set_job_state(
+            status="failed",
+            finished_at=_now_iso(),
+            results_ready=False,
+            error=str(e),
+        )
     except subprocess.CalledProcessError as e:
         logging.error("Step failed: %s", e)
         traceback.print_exc()
@@ -497,11 +536,17 @@ def _execute_new_scrape(subcats, date_start, date_end):
     port = os.environ.get("PORT", "5000")
     progress_url = f"http://127.0.0.1:{port}/progress_update"
 
-    run_step('python "1- Sitemap links.py"', "1/5 Zber sitemap", progress_url)
-    run_step('python "2 - Local filtering.py"', "2/5 Prvé filtrovanie", progress_url)
-    run_step('python "3 - Ad HTML scraper.py"', "3/5 Sťahovanie inzerátov", progress_url)
-    run_step('python "4 - Filter by description.py"', "4/5 Filtrovanie popisov", progress_url)
-    run_step('python "5 - OpenAI filtering.py"', "5/5 OpenAI filtrovanie", progress_url)
+    try:
+        run_step('python "1- Sitemap links.py"', "1/5 – Zbieram sitemapy", progress_url)
+    except subprocess.CalledProcessError as exc:
+        raise SitemapCollectionError(
+            "Nepodarilo sa načítať všetky sitemap súbory – zber bol zastavený."
+        ) from exc
+
+    run_step('python "2 - Local filtering.py"', "2/5 – Prvé filtrovanie", progress_url)
+    run_step('python "3 - Ad HTML scraper.py"', "3/5 – HTML filtrácia", progress_url)
+    run_step('python "4 - Filter by description.py"', "4/5 – Filtrovanie podľa popisu", progress_url)
+    run_step('python "5 - OpenAI filtering.py"', "5/5 – Finálne filtrovanie", progress_url)
 
     # This code is not used because it is done in 1 - sitemaps
     # # After phase 1, update old_links in GitHub
@@ -523,23 +568,7 @@ def _execute_new_scrape(subcats, date_start, date_end):
         append_phase3_results(phase3_text)
 
     # Filter new results according to provided filters
-    filtered = []
-    d1 = _parse_date(date_start) if date_start else None
-    d2 = _parse_date(date_end)   if date_end   else None
-
-    for res in new_results:
-        if subcats and res.get("subcat", "").strip() not in subcats:
-            continue
-        if d1 and d2:
-            ad_date = res.get("date")
-            if ad_date and not (d1 <= ad_date.date() <= d2):
-                continue
-
-        filtered.append({
-            "url": res.get("url"),
-            "subcat": res.get("subcat", ""),
-            "date": res.get("date").strftime("%d/%m/%Y %H:%M") if res.get("date") else "",
-        })
+    filtered = _filter_results_by_params(new_results, subcats, date_start, date_end)
 
     with progress_lock:
         final_total = progress_state.get("total", 0)
@@ -555,26 +584,24 @@ def fetch_previous_results(subcats, start_date, end_date):
         all_results = parse_result_blocks_text(text)
     else:
         all_results = []
-    filtered = []
+    return _filter_results_by_params(all_results, subcats, start_date, end_date)
 
-    d1 = _parse_date(start_date) if start_date else None
-    d2 = _parse_date(end_date)   if end_date   else None
 
-    for res in all_results:
-        if subcats and res.get("subcat", "").strip() not in subcats:
-            continue
-        if d1 and d2:
-            ad_date = res.get("date")
-            if ad_date and not (d1 <= ad_date.date() <= d2):
-                continue
+def fetch_latest_results(subcats, start_date, end_date):
+    if not os.path.exists(LATEST_RESULTS_FILE):
+        return []
 
-        filtered.append({
-            "url": res.get("url"),
-            "subcat": res.get("subcat", ""),
-            "date": res.get("date").strftime("%d/%m/%Y %H:%M") if res.get("date") else "",
-        })
+    try:
+        with open(LATEST_RESULTS_FILE, encoding="utf-8") as f:
+            text = f.read()
+    except FileNotFoundError:
+        return []
 
-    return filtered
+    if not text.strip():
+        return []
+
+    recent_results = parse_result_blocks_text(text)
+    return _filter_results_by_params(recent_results, subcats, start_date, end_date)
 
 @app.route("/feedback", methods=["POST"])
 def feedback():

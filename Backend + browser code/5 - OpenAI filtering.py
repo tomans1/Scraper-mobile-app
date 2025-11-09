@@ -90,11 +90,11 @@ removed_blocks = {}
 total = len(all_blocks)
 done = 0
 try:
-    requests.post(
-        PROGRESS_URL,
-        json={"phase": "5/5 OpenAI filtrovanie", "done": 0, "total": total},
-        timeout=3,
-    )
+        requests.post(
+            PROGRESS_URL,
+            json={"phase": "5/5 – Finálne filtrovanie", "done": 0, "total": total},
+            timeout=3,
+        )
 except Exception:
     pass
 
@@ -118,11 +118,11 @@ for batch in tqdm(list(batch_blocks(all_blocks, CHUNK_SIZE)), desc="Filtering vi
             kept_blocks.append(block)
     done += len(batch)
     try:
-        requests.post(
-            PROGRESS_URL,
-            json={"phase": "5/5 OpenAI filtrovanie", "done": done, "total": total},
-            timeout=3,
-        )
+                requests.post(
+                    PROGRESS_URL,
+                    json={"phase": "5/5 – Finálne filtrovanie", "done": done, "total": total},
+                    timeout=3,
+                )
     except Exception:
         pass
 
@@ -178,10 +178,10 @@ _append_blocks(REMOVED_FILE, removed_blocks.values(), _format_removed_block)
 
 print(f"\nFiltering complete. Kept: {len(kept_blocks)} | Removed: {len(removed_blocks)}")
 try:
-    requests.post(
-        PROGRESS_URL,
-        json={"phase": "5/5 OpenAI filtrovanie", "done": total, "total": total},
-        timeout=3,
-    )
+        requests.post(
+            PROGRESS_URL,
+            json={"phase": "5/5 – Finálne filtrovanie", "done": total, "total": total},
+            timeout=3,
+        )
 except Exception:
     pass
