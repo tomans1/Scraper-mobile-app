@@ -1,6 +1,7 @@
 import { createContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as AuthAPI from '../api/auth';
+import { setAuthToken } from '../api/client';
 
 export const AuthContext = createContext();
 
@@ -19,18 +20,21 @@ export function AuthProvider({ children }) {
     try {
       setIsLoading(true);
       const token = await AsyncStorage.getItem(TOKEN_KEY);
+      setAuthToken(token);
       if (token) {
-        global.authToken = token;
         const data = await AuthAPI.checkAuthStatus();
         setIsAuthenticated(data.authenticated);
         if (!data.authenticated) {
           await AsyncStorage.removeItem(TOKEN_KEY);
-          global.authToken = null;
+          setAuthToken(null);
         }
+      } else {
+        setIsAuthenticated(false);
       }
       setError(null);
     } catch (err) {
       setIsAuthenticated(false);
+      setAuthToken(null);
     } finally {
       setIsLoading(false);
     }
@@ -41,9 +45,16 @@ export function AuthProvider({ children }) {
       setIsLoading(true);
       const data = await AuthAPI.checkAuthStatus();
       setIsAuthenticated(data.authenticated);
+      if (!data.authenticated) {
+        await AsyncStorage.removeItem(TOKEN_KEY);
+        setAuthToken(null);
+      }
       setError(null);
+      return data.authenticated;
     } catch (err) {
       setIsAuthenticated(false);
+      setAuthToken(null);
+      return false;
     } finally {
       setIsLoading(false);
     }
@@ -55,10 +66,10 @@ export function AuthProvider({ children }) {
       const data = await AuthAPI.login(password);
       if (data.token) {
         await AsyncStorage.setItem(TOKEN_KEY, data.token);
-        global.authToken = data.token;
+        setAuthToken(data.token);
       }
-      await checkAuth();
-      return true;
+      const authenticated = await checkAuth();
+      return authenticated;
     } catch (err) {
       setError(err.message || 'Login failed');
       return false;
@@ -69,7 +80,7 @@ export function AuthProvider({ children }) {
     try {
       await AuthAPI.logout();
       await AsyncStorage.removeItem(TOKEN_KEY);
-      global.authToken = null;
+      setAuthToken(null);
       setIsAuthenticated(false);
       setError(null);
     } catch (err) {
