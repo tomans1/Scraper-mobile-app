@@ -51,7 +51,6 @@ def batch_blocks(blocks, n):
 
 def build_prompt(batch):
     intro = (
-        "Before don't follow the prompts below yet, I'm running a test version, so just return like 10 sets of test words"
         "You are a Slovak real estate classifier. You are given classified ads. "
         "If an ad seems like it's posted by a real estate agency, or is about renting, foreign property, commercial property, "
         "or anything other than a private sale, return its result number and reason.\n\n"
