@@ -1,4 +1,4 @@
-import { apiRequest } from './client';
+import { apiRequest, API_BASE } from './client';
 
 const CATEGORIES = [
   'Byty',
@@ -43,16 +43,15 @@ export async function restartScraper() {
 }
 
 export async function sendFeedback(keyword) {
-  return fetch('https://web-production-ec52.up.railway.app/feedback', {
+  return fetch(`${API_BASE}/feedback`, {
     method: 'POST',
     body: keyword,
-    credentials: 'include',
   });
 }
 
 export async function checkServerHealth() {
   try {
-    const response = await fetch('https://web-production-ec52.up.railway.app/health', {
+    const response = await fetch(`${API_BASE}/health`, {
       cache: 'no-store',
     });
     if (!response.ok) {
@@ -67,7 +66,7 @@ export async function checkServerHealth() {
 
 export async function wakeServer() {
   try {
-    await fetch('https://web-production-ec52.up.railway.app/wake', {
+    await fetch(`${API_BASE}/wake`, {
       method: 'POST',
     });
     return true;
