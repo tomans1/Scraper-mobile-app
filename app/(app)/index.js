@@ -62,6 +62,9 @@ export default function HomeScreen() {
   const jobStateRef = useRef(INITIAL_JOB_STATE);
   const suppressJobUpdatesRef = useRef(false);
   const suppressedJobIdRef = useRef(null);
+  const latestResultsRunRef = useRef(null);
+  const resultsModeRef = useRef('latest');
+  const resultsRequestRef = useRef(null);
 
   const categories = ScraperAPI.getCategories();
 
@@ -84,6 +87,9 @@ export default function HomeScreen() {
       suppressedJobIdRef.current = previousJobId || SOFT_RESET_ANY_JOB;
       pendingResultsJobRef.current = null;
       lastNotifiedErrorRef.current = null;
+      latestResultsRunRef.current = null;
+      resultsModeRef.current = 'latest';
+      resultsRequestRef.current = null;
       if (!skipNavigation) {
         router.replace('/');
       }
@@ -99,7 +105,10 @@ export default function HomeScreen() {
 
   const loadLatestResults = useCallback(
     async (overrideFilters, options = {}) => {
-      const { showErrors = true, mode = 'latest' } = options;
+      const { showErrors = true, mode = 'latest', jobId = null } = options;
+      const requestToken = Symbol('resultsRequest');
+      resultsRequestRef.current = { token: requestToken, mode };
+      const previousMode = resultsModeRef.current;
       try {
         const baseFilters =
           overrideFilters ||
@@ -124,14 +133,38 @@ export default function HomeScreen() {
             ? response.results
             : [];
 
+        if (mode === 'latest') {
+          if (jobId && latestResultsRunRef.current && jobId !== latestResultsRunRef.current) {
+            return false;
+          }
+          if (jobId) {
+            latestResultsRunRef.current = jobId;
+          }
+          resultsModeRef.current = 'latest';
+        } else {
+          if (resultsModeRef.current !== 'history') {
+            return false;
+          }
+          resultsModeRef.current = 'history';
+        }
+
+        if (resultsRequestRef.current?.token !== requestToken) {
+          return false;
+        }
+
         setResults(normalized);
         setResultsExpanded(normalized.length > 0);
         return true;
       } catch (err) {
+        resultsModeRef.current = previousMode;
         if (showErrors) {
           Alert.alert('Chyba', 'Nepodarilo sa načítať výsledky');
         }
         return false;
+      } finally {
+        if (resultsRequestRef.current?.token === requestToken) {
+          resultsRequestRef.current = null;
+        }
       }
     },
     [dateEnd, dateStart, lastFilters, selectedCategories]
@@ -255,8 +288,15 @@ export default function HomeScreen() {
       }
 
       const startedAt = job.started_at;
+      if (startedAt && ['running', 'starting', 'finished'].includes(status)) {
+        latestResultsRunRef.current = startedAt;
+      }
       if (!shouldSuppressUi && status === 'finished' && job.results_ready && startedAt && pendingResultsJobRef.current === startedAt) {
-        const success = await loadLatestResults(undefined, { showErrors: true, mode: 'latest' });
+        const success = await loadLatestResults(undefined, {
+          showErrors: true,
+          mode: 'latest',
+          jobId: startedAt,
+        });
         if (success) {
           pendingResultsJobRef.current = null;
         }
@@ -296,10 +336,13 @@ export default function HomeScreen() {
     setProgress(0);
     setProgressLabel('Pripravujem zber...');
     setStageLabel('');
+    resultsModeRef.current = 'latest';
+    resultsRequestRef.current = null;
 
     const provisionalId = new Date().toISOString();
     pendingResultsJobRef.current = provisionalId;
     lastNotifiedErrorRef.current = null;
+    latestResultsRunRef.current = provisionalId;
     setJobState({
       ...INITIAL_JOB_STATE,
       status: 'starting',
@@ -315,6 +358,7 @@ export default function HomeScreen() {
         if (jobInfo) {
           setJobState((prev) => ({ ...prev, ...jobInfo }));
           pendingResultsJobRef.current = jobInfo.started_at || null;
+          latestResultsRunRef.current = jobInfo.started_at || null;
         }
         Alert.alert('Info', response?.error || 'Zber už prebieha.');
         return;
@@ -322,6 +366,7 @@ export default function HomeScreen() {
 
       const startedAt = jobInfo?.started_at || provisionalId;
       pendingResultsJobRef.current = startedAt;
+      latestResultsRunRef.current = startedAt;
 
       setJobState((prev) => ({
         ...prev,
@@ -336,6 +381,7 @@ export default function HomeScreen() {
     } catch (err) {
       Alert.alert('Chyba', 'Chyba pri spustení zberu');
       pendingResultsJobRef.current = null;
+      latestResultsRunRef.current = null;
       setJobState({ ...INITIAL_JOB_STATE });
     }
   };
@@ -509,6 +555,8 @@ export default function HomeScreen() {
 
     setLastFilters(baseFilters);
 
+    const previousMode = resultsModeRef.current;
+    resultsModeRef.current = 'history';
     const success = await loadLatestResults(baseFilters, { mode: 'old' });
     if (success) {
       setProgress(0);
@@ -516,6 +564,7 @@ export default function HomeScreen() {
       setStageLabel('');
     } else {
       setProgressLabel('');
+      resultsModeRef.current = previousMode;
     }
     setJobState((prev) => ({ ...prev, status: 'idle' }));
   }, [dateEnd, dateStart, loadLatestResults, selectedCategories, useDateRange]);
@@ -534,21 +583,29 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
-        <TouchableOpacity
-          onPress={handleHeaderPress}
-          style={styles.headerTitleWrapper}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.headerTitle}>🔥 Inferno Scraper</Text>
-          <Text style={styles.headerSubtitle}>Lead finder pre reality.bazos.sk</Text>
-        </TouchableOpacity>
-        <View style={styles.headerActions}>
+        <View style={styles.headerMain}>
+          <TouchableOpacity
+            onPress={handleHeaderPress}
+            style={styles.headerTitleWrapper}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.headerTitle} numberOfLines={1} ellipsizeMode="tail">
+              🔥 Inferno Scraper
+            </Text>
+            <Text style={styles.headerSubtitle} numberOfLines={1} ellipsizeMode="tail">
+              Lead finder pre reality.bazos.sk
+            </Text>
+          </TouchableOpacity>
+          <View style={styles.statusWrapper}>
+            <ServerStatus status={serverStatus} onWake={handleWakeServer} />
+          </View>
           {showKillButton && (
             <TouchableOpacity onPress={cancelScrape} style={styles.killButton}>
               <Text style={styles.killButtonText}>❌ Zrušiť zber</Text>
             </TouchableOpacity>
           )}
-          <ServerStatus status={serverStatus} onWake={handleWakeServer} />
+        </View>
+        <View style={styles.headerIcons}>
           <TouchableOpacity onPress={restartApp} style={styles.headerIcon}>
             <RefreshCw size={20} color="#6b7280" />
           </TouchableOpacity>
@@ -673,8 +730,16 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
   },
+  headerMain: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexGrow: 1,
+    flexShrink: 1,
+    gap: 12,
+  },
   headerTitleWrapper: {
     flexShrink: 1,
+    minWidth: 0,
   },
   headerTitle: {
     fontSize: 20,
@@ -686,21 +751,27 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     marginTop: 2,
   },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
+  statusWrapper: {
+    flexShrink: 0,
   },
   killButton: {
     backgroundColor: '#fee2e2',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 6,
+    flexShrink: 0,
   },
   killButtonText: {
     color: '#b91c1c',
     fontWeight: '600',
     fontSize: 12,
+  },
+  headerIcons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flexShrink: 0,
+    marginLeft: 16,
   },
   headerIcon: {
     padding: 8,

@@ -56,6 +56,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flexShrink: 0,
   },
   statusRow: {
     flexDirection: 'row',
@@ -70,7 +71,7 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 12,
     fontWeight: '500',
-    minWidth: 96,
+    minWidth: 108,
   },
   wakeButton: {
     paddingHorizontal: 8,
