@@ -173,6 +173,19 @@ def _format_removed_block(item):
     return "\n".join(block) + f"\nREASON: {reason}\n" + "=" * 60 + "\n"
 
 
+def _reset_file(path):
+    """Truncate ``path`` so every run starts with a clean file."""
+    try:
+        with open(path, "w", encoding="utf-8"):
+            pass
+    except OSError:
+        # File may live in a non-existing directory on the first run – ignore.
+        return
+
+
+# Ensure we don't keep results from previous executions.
+_reset_file(OUTPUT_FILE)
+_reset_file(REMOVED_FILE)
 _append_blocks(OUTPUT_FILE, kept_blocks, _format_kept_block)
 _append_blocks(REMOVED_FILE, removed_blocks.values(), _format_removed_block)
 
