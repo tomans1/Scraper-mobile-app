@@ -126,6 +126,11 @@ export default function HomeScreen() {
 
         setResults(normalized);
         setResultsExpanded(normalized.length > 0);
+        setJobState((prev) => ({
+          ...prev,
+          last_count: normalized.length,
+          results_ready: normalized.length > 0,
+        }));
         return true;
       } catch (err) {
         if (showErrors) {
@@ -168,6 +173,31 @@ export default function HomeScreen() {
       };
 
       const jobStartedAt = job.started_at || null;
+      const isTerminalStatus = ['finished', 'failed', 'cancelled'].includes(status);
+      const currentSessionStartedAt = jobStateRef.current?.started_at || null;
+      const pendingJobId = pendingResultsJobRef.current;
+      const isCurrentSessionJob =
+        currentSessionStartedAt &&
+        jobStartedAt &&
+        currentSessionStartedAt === jobStartedAt;
+      const isPendingSessionJob =
+        pendingJobId && jobStartedAt && pendingJobId === jobStartedAt;
+      const allowTerminalDisplay =
+        !isTerminalStatus || isCurrentSessionJob || isPendingSessionJob;
+
+      const displayStatus = allowTerminalDisplay ? status : 'idle';
+      const displayPhase = allowTerminalDisplay ? effectivePhase : '';
+      const displayDone = allowTerminalDisplay ? effectiveDone : 0;
+      const displayTotal = allowTerminalDisplay ? effectiveTotal : 0;
+      const nextJobState = {
+        ...job,
+        status: displayStatus,
+        phase: displayPhase,
+        done: displayDone,
+        total: displayTotal,
+        results_ready: allowTerminalDisplay ? job.results_ready : false,
+        started_at: allowTerminalDisplay ? jobStartedAt : null,
+      };
 
       if (suppressJobUpdatesRef.current) {
         const suppressedId = suppressedJobIdRef.current;
@@ -194,10 +224,10 @@ export default function HomeScreen() {
 
       setJobState((prev) => ({
         ...prev,
-        ...job,
-        phase: job.phase ?? effectivePhase,
-        done: Number.isFinite(Number(job.done)) ? Number(job.done) : effectiveDone,
-        total: Number.isFinite(Number(job.total)) ? Number(job.total) : effectiveTotal,
+        ...nextJobState,
+        phase: nextJobState.phase,
+        done: nextJobState.done,
+        total: nextJobState.total,
       }));
 
       if (shouldSuppressUi) {
@@ -205,50 +235,49 @@ export default function HomeScreen() {
         setProgress(0);
         setProgressLabel('');
       } else {
-        const baseStage = stageLabels[effectivePhase] || (effectivePhase === 'Hotovo' ? '' : effectivePhase);
+        const baseStage =
+          stageLabels[displayPhase] || (displayPhase === 'Hotovo' ? '' : displayPhase);
 
         let nextStageLabel = baseStage;
-        if (status === 'finished') {
+        if (displayStatus === 'finished') {
           nextStageLabel = '✅ Zber dokončený';
-        } else if (status === 'failed') {
-          nextStageLabel = '❌ Zber zlyhal';
-        } else if (status === 'cancelled') {
-          nextStageLabel = 'Zber bol zrušený';
+        } else if (displayStatus === 'failed' || displayStatus === 'cancelled') {
+          nextStageLabel = '';
         }
         setStageLabel(nextStageLabel);
 
-        const isActive = status === 'running' || status === 'starting';
-        const progressValue = effectiveTotal > 0
-          ? Math.min(100, (effectiveDone / effectiveTotal) * 100)
+        const isActive = displayStatus === 'running' || displayStatus === 'starting';
+        const progressValue = displayTotal > 0
+          ? Math.min(100, (displayDone / displayTotal) * 100)
           : isActive
             ? 10
-            : status === 'finished'
+            : displayStatus === 'finished'
               ? 100
               : 0;
         setProgress(progressValue);
 
         let label = '';
-        if (status === 'starting') {
+        if (displayStatus === 'starting') {
           label = 'Pripravujem zber...';
-        } else if (status === 'running') {
-          const prefix = stageLabels[effectivePhase]
-            ? `${stageLabels[effectivePhase]}: `
+        } else if (displayStatus === 'running') {
+          const prefix = stageLabels[displayPhase]
+            ? `${stageLabels[displayPhase]}: `
             : '';
-          if (effectiveTotal > 1) {
-            label = `${prefix}${effectiveDone}/${effectiveTotal}`;
+          if (displayTotal > 1) {
+            label = `${prefix}${displayDone}/${displayTotal}`;
           } else if (prefix) {
             label = prefix.trim();
           } else {
             label = 'Spracúvam...';
           }
-        } else if (status === 'finished') {
-          const count = job.last_count ?? effectiveDone;
+        } else if (displayStatus === 'finished') {
+          const count = job.last_count ?? displayDone;
           label = `✅ Výsledky pripravené (${count || 0})`;
-        } else if (status === 'failed') {
+        } else if (displayStatus === 'failed') {
           label = '❌ Zber zlyhal';
-        } else if (status === 'cancelled') {
+        } else if (displayStatus === 'cancelled') {
           label = '⏹️ Zber zrušený';
-        } else if (status === 'restarting') {
+        } else if (displayStatus === 'restarting') {
           label = 'Reštart servera prebieha';
         }
         setProgressLabel(label);
@@ -495,11 +524,31 @@ export default function HomeScreen() {
   };
 
   const handleLoadPreviousResults = useCallback(async () => {
+    setProgress(0);
     setProgressLabel('Načítavam výsledky...');
     setStageLabel('');
     pendingResultsJobRef.current = null;
     suppressJobUpdatesRef.current = false;
     suppressedJobIdRef.current = null;
+
+    jobStateRef.current = {
+      ...jobStateRef.current,
+      status: 'idle',
+      started_at: null,
+      results_ready: false,
+      phase: '',
+      done: 0,
+      total: 0,
+    };
+    setJobState((prev) => ({
+      ...prev,
+      status: 'idle',
+      started_at: null,
+      results_ready: false,
+      phase: '',
+      done: 0,
+      total: 0,
+    }));
 
     const baseFilters = {
       subcategories: selectedCategories,
@@ -510,23 +559,14 @@ export default function HomeScreen() {
     setLastFilters(baseFilters);
 
     const success = await loadLatestResults(baseFilters, { mode: 'old' });
-    if (success) {
-      setProgress(0);
-      setProgressLabel('Predchádzajúce výsledky načítané');
-      setStageLabel('');
-    } else {
-      setProgressLabel('');
-    }
-    setJobState((prev) => ({ ...prev, status: 'idle' }));
+    setProgress(0);
+    setStageLabel('');
+    setProgressLabel('');
   }, [dateEnd, dateStart, loadLatestResults, selectedCategories, useDateRange]);
 
   const isRunning = jobState.status === 'running' || jobState.status === 'starting';
   const showKillButton = jobState.status === 'running' || jobState.status === 'starting';
   const disableStart = isRunning || jobState.status === 'restarting';
-  const completionInfo = jobState.status === 'finished'
-    ? `Posledný zber: ${jobState.last_count ?? results.length} záznamov`
-    : '';
-
   const handleHeaderPress = useCallback(() => {
     softResetUI({ skipNavigation: true });
   }, [softResetUI]);
@@ -583,17 +623,13 @@ export default function HomeScreen() {
             />
           </View>
 
-          {(progress > 0 || progressLabel) && (
+          {(progress > 0 || progressLabel || stageLabel) && (
             <ProgressBar
               progress={progress}
               label={progressLabel}
               stageLabel={stageLabel}
             />
           )}
-
-          {completionInfo ? (
-            <Text style={styles.completionLabel}>{completionInfo}</Text>
-          ) : null}
 
           {results.length > 0 && (
             <View style={styles.resultsSection}>
@@ -737,11 +773,6 @@ const styles = StyleSheet.create({
   },
   buttonsGroup: {
     gap: 8,
-  },
-  completionLabel: {
-    fontSize: 12,
-    color: '#047857',
-    marginTop: 4,
   },
   resultsSection: {
     marginTop: 24,
