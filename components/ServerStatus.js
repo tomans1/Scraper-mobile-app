@@ -37,7 +37,13 @@ export function ServerStatus({ status, onWake }) {
     <View style={styles.container}>
       <View style={styles.statusRow}>
         <View style={[styles.dot, { backgroundColor: config.color }]} />
-        <Text style={[styles.label, { color: config.color }]}>{config.label}</Text>
+        <Text
+          style={[styles.label, { color: config.color }]}
+          numberOfLines={1}
+          ellipsizeMode="tail"
+        >
+          {config.label}
+        </Text>
       </View>
       {config.showWake && (
         <TouchableOpacity onPress={onWake} style={styles.wakeButton}>
@@ -61,6 +67,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    minWidth: 128,
+    justifyContent: 'flex-start',
   },
   dot: {
     width: 10,
@@ -70,6 +78,9 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 12,
     fontWeight: '500',
+    minWidth: 112,
+    textAlign: 'left',
+    flexShrink: 0,
   },
   wakeButton: {
     paddingHorizontal: 8,

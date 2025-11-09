@@ -57,6 +57,7 @@ export default function HomeScreen() {
   const serverStatusIntervalRef = useRef(null);
   const pendingResultsJobRef = useRef(null);
   const lastNotifiedErrorRef = useRef(null);
+  const jobStatusSuppressedRef = useRef(false);
 
   const categories = ScraperAPI.getCategories();
 
@@ -79,6 +80,7 @@ export default function HomeScreen() {
       setJobState({ ...INITIAL_JOB_STATE });
       pendingResultsJobRef.current = null;
       lastNotifiedErrorRef.current = null;
+      jobStatusSuppressedRef.current = true;
       if (!skipNavigation) {
         router.replace('/');
       }
@@ -94,7 +96,7 @@ export default function HomeScreen() {
 
   const loadLatestResults = useCallback(
     async (overrideFilters, options = {}) => {
-      const { showErrors = true } = options;
+      const { showErrors = true, latestOnly = false } = options;
       try {
         const baseFilters =
           overrideFilters ||
@@ -108,7 +110,7 @@ export default function HomeScreen() {
           return false;
         }
 
-        const response = await ScraperAPI.fetchResults(baseFilters);
+        const response = await ScraperAPI.fetchResults(baseFilters, { latestOnly });
 
         const normalized = Array.isArray(response)
           ? response
@@ -142,6 +144,10 @@ export default function HomeScreen() {
       const totalValue = Number(data?.total) || 0;
       const job = data?.job || {};
       const status = job.status || 'idle';
+
+      if (jobStatusSuppressedRef.current) {
+        return;
+      }
 
       const effectivePhase = job.phase || phase || '';
       const effectiveDone = Number.isFinite(Number(job.done))
@@ -217,7 +223,7 @@ export default function HomeScreen() {
 
       const startedAt = job.started_at;
       if (status === 'finished' && job.results_ready && startedAt && pendingResultsJobRef.current === startedAt) {
-        const success = await loadLatestResults(undefined, { showErrors: true });
+        const success = await loadLatestResults(undefined, { showErrors: true, latestOnly: true });
         if (success) {
           pendingResultsJobRef.current = null;
         }
@@ -239,6 +245,7 @@ export default function HomeScreen() {
     }
   }, [loadLatestResults]);
   const startScrape = async () => {
+    jobStatusSuppressedRef.current = false;
     if (['running', 'starting'].includes(jobState.status)) {
       return;
     }
@@ -450,6 +457,7 @@ export default function HomeScreen() {
   };
 
   const handleLoadPreviousResults = useCallback(async () => {
+    jobStatusSuppressedRef.current = false;
     setProgressLabel('Načítavam výsledky...');
     setStageLabel('');
     pendingResultsJobRef.current = null;

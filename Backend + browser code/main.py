@@ -76,6 +76,9 @@ PHASE3_FILE  = os.path.join(DATA_DIR, "phase3_filtered_links.txt")
 # Holds results from the most recent run only. This file is never pushed to
 # GitHub and is used solely for returning new results to the UI.
 LATEST_RESULTS_FILE = os.path.join(DATA_DIR, "latest_results.txt")
+# Temporary file used by the worker scripts to bubble up human friendly error
+# messages to the API layer.
+ERROR_MESSAGE_FILE = os.path.join(DATA_DIR, "latest_error.txt")
 progress_state = {"phase": "", "done": 0, "total": 0}
 SERVER_START_TIME = datetime.utcnow()
 progress_lock = threading.Lock()
@@ -125,6 +128,22 @@ def _now_iso():
 
 
 reset_job_state()
+
+
+def _consume_last_error_message():
+    if not os.path.exists(ERROR_MESSAGE_FILE):
+        return None
+    message = None
+    try:
+        with open(ERROR_MESSAGE_FILE, encoding="utf-8") as f:
+            message = f.read().strip() or None
+    except Exception:
+        message = None
+    try:
+        os.remove(ERROR_MESSAGE_FILE)
+    except Exception:
+        pass
+    return message
 
 
 def reset_progress():
@@ -405,6 +424,40 @@ def _parse_date(s: str):
             continue
     return None
 
+
+def _filter_results(all_results, subcats, start_date, end_date):
+    if not all_results:
+        return []
+
+    if subcats:
+        subcat_set = {str(item).strip() for item in subcats if str(item).strip()}
+    else:
+        subcat_set = set()
+
+    d1 = _parse_date(start_date) if start_date else None
+    d2 = _parse_date(end_date) if end_date else None
+
+    filtered = []
+    for res in all_results:
+        subcat_value = (res.get("subcat") or "").strip()
+        if subcat_set and subcat_value not in subcat_set:
+            continue
+
+        if d1 and d2:
+            ad_date = res.get("date")
+            if ad_date and not (d1 <= ad_date.date() <= d2):
+                continue
+
+        filtered.append(
+            {
+                "url": res.get("url"),
+                "subcat": subcat_value,
+                "date": res.get("date").strftime("%d/%m/%Y %H:%M") if res.get("date") else "",
+            }
+        )
+
+    return filtered
+
 @app.route("/scrape", methods=["POST"])
 @require_auth
 def scrape():
@@ -415,6 +468,10 @@ def scrape():
     subcats = set(data.get("subcategories", []))
     date_start = data.get("date_start")
     date_end   = data.get("date_end")
+
+    if mode == "latest":
+        results = fetch_latest_results(subcats, date_start, date_end)
+        return jsonify(results)
 
     if mode == "old":
         results = fetch_previous_results(subcats, date_start, date_end)
@@ -470,7 +527,9 @@ def _run_scrape_job(payload):
     except subprocess.CalledProcessError as e:
         logging.error("Step failed: %s", e)
         traceback.print_exc()
-        message = f"Skript '{e.cmd}' skončil s chybovým kódom {e.returncode}"
+        message = _consume_last_error_message() or (
+            f"Skript '{e.cmd}' skončil s chybovým kódom {e.returncode}"
+        )
         set_job_state(
             status="failed",
             finished_at=_now_iso(),
@@ -480,15 +539,29 @@ def _run_scrape_job(payload):
     except Exception as e:
         logging.exception("Unexpected error during scrape")
         update_progress("❌ Neznáma chyba", done=0, total=1)
+        message = _consume_last_error_message() or f"Neočakávaná chyba: {e}"
         set_job_state(
             status="failed",
             finished_at=_now_iso(),
             results_ready=False,
-            error=f"Neočakávaná chyba: {e}",
+            error=message,
         )
 
 
 def _execute_new_scrape(subcats, date_start, date_end):
+    # Clear residual data from previous runs so stale results are never
+    # returned when a new scrape is launched.
+    if os.path.exists(ERROR_MESSAGE_FILE):
+        try:
+            os.remove(ERROR_MESSAGE_FILE)
+        except OSError:
+            pass
+    if os.path.exists(LATEST_RESULTS_FILE):
+        try:
+            os.remove(LATEST_RESULTS_FILE)
+        except OSError:
+            pass
+
     # Load old links from GitHub and inject to disk for phase 1
     old_links = load_old_links()
     with open("Data/old_results.txt", "w", encoding="utf-8") as f:
@@ -523,23 +596,7 @@ def _execute_new_scrape(subcats, date_start, date_end):
         append_phase3_results(phase3_text)
 
     # Filter new results according to provided filters
-    filtered = []
-    d1 = _parse_date(date_start) if date_start else None
-    d2 = _parse_date(date_end)   if date_end   else None
-
-    for res in new_results:
-        if subcats and res.get("subcat", "").strip() not in subcats:
-            continue
-        if d1 and d2:
-            ad_date = res.get("date")
-            if ad_date and not (d1 <= ad_date.date() <= d2):
-                continue
-
-        filtered.append({
-            "url": res.get("url"),
-            "subcat": res.get("subcat", ""),
-            "date": res.get("date").strftime("%d/%m/%Y %H:%M") if res.get("date") else "",
-        })
+    filtered = _filter_results(new_results, subcats, date_start, date_end)
 
     with progress_lock:
         final_total = progress_state.get("total", 0)
@@ -555,26 +612,25 @@ def fetch_previous_results(subcats, start_date, end_date):
         all_results = parse_result_blocks_text(text)
     else:
         all_results = []
-    filtered = []
 
-    d1 = _parse_date(start_date) if start_date else None
-    d2 = _parse_date(end_date)   if end_date   else None
+    return _filter_results(all_results, subcats, start_date, end_date)
 
-    for res in all_results:
-        if subcats and res.get("subcat", "").strip() not in subcats:
-            continue
-        if d1 and d2:
-            ad_date = res.get("date")
-            if ad_date and not (d1 <= ad_date.date() <= d2):
-                continue
 
-        filtered.append({
-            "url": res.get("url"),
-            "subcat": res.get("subcat", ""),
-            "date": res.get("date").strftime("%d/%m/%Y %H:%M") if res.get("date") else "",
-        })
+def fetch_latest_results(subcats, start_date, end_date):
+    if not os.path.exists(LATEST_RESULTS_FILE):
+        return []
 
-    return filtered
+    try:
+        with open(LATEST_RESULTS_FILE, encoding="utf-8") as f:
+            text = f.read()
+    except FileNotFoundError:
+        return []
+
+    if not text.strip():
+        return []
+
+    all_results = parse_result_blocks_text(text)
+    return _filter_results(all_results, subcats, start_date, end_date)
 
 @app.route("/feedback", methods=["POST"])
 def feedback():

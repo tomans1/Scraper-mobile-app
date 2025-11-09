@@ -26,16 +26,90 @@ os.makedirs(DATA_DIR, exist_ok=True)
 ACQUIRED_FILE = os.path.join(DATA_DIR, "acquired_links.txt")
 OLD_FILE = os.path.join(DATA_DIR, "old_results.txt")
 NEW_FILE = os.path.join(DATA_DIR, "new_links.txt")
+ERROR_FILE = os.path.join(DATA_DIR, "latest_error.txt")
 
 DELAY_SECONDS = 0
+EXPECTED_SITEMAP_COUNT = 13
+INDEX_RETRY_ATTEMPTS = 5
+SITEMAP_RETRY_ATTEMPTS = 4
+RETRY_DELAY_SECONDS = 2
+FATAL_SITEMAP_MESSAGE = "Nepodarilo sa načítať všetky sitemap súbory – zber bol zastavený"
+
+if os.path.exists(ERROR_FILE):
+    try:
+        os.remove(ERROR_FILE)
+    except OSError:
+        pass
+
+
+def record_error_message(message: str):
+    try:
+        with open(ERROR_FILE, "w", encoding="utf-8") as f:
+            f.write(message.strip())
+    except Exception:
+        pass
+
+
+def fail_with_error(message, detail=None):
+    record_error_message(message)
+    print(f"❌ {message}")
+    if detail:
+        print(f"Detail: {detail}")
+    raise SystemExit(2)
+
+
+def notify_progress(done, total):
+    try:
+        requests.post(
+            PROGRESS_URL,
+            json={"phase": "1/5 Zber sitemap", "done": done, "total": total},
+            timeout=3,
+        )
+    except Exception:
+        pass
 
 # Main scraper functions
 def get_sitemap_pages(session):
-    resp = session.get(SITEMAP_INDEX, headers=random.choice(HEADERS_POOL), timeout=25)
-    resp.raise_for_status()
-    soup = BeautifulSoup(resp.text, "xml")
-    sitemap_urls = [loc.text for loc in soup.find_all("loc")]
-    return [url for url in sitemap_urls if "sitemapdetail.php" in url]
+    last_error = None
+    for attempt in range(1, INDEX_RETRY_ATTEMPTS + 1):
+        try:
+            resp = session.get(
+                SITEMAP_INDEX,
+                headers=random.choice(HEADERS_POOL),
+                timeout=25,
+            )
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "xml")
+            sitemap_urls = [loc.text.strip() for loc in soup.find_all("loc") if loc.text]
+            detail_urls = [url for url in sitemap_urls if "sitemapdetail.php" in url]
+
+            seen = set()
+            unique_urls = []
+            for url in detail_urls:
+                if url not in seen:
+                    unique_urls.append(url)
+                    seen.add(url)
+
+            if len(unique_urls) == EXPECTED_SITEMAP_COUNT:
+                return unique_urls
+
+            last_error = RuntimeError(
+                f"Expected {EXPECTED_SITEMAP_COUNT} sitemaps, received {len(unique_urls)}"
+            )
+        except Exception as exc:
+            last_error = exc
+
+        if attempt < INDEX_RETRY_ATTEMPTS:
+            wait = RETRY_DELAY_SECONDS * attempt
+            print(
+                f"Retrying sitemap index ({attempt}/{INDEX_RETRY_ATTEMPTS}) in {wait}s..."
+            )
+            time.sleep(wait)
+
+    fail_with_error(
+        FATAL_SITEMAP_MESSAGE,
+        detail=str(last_error) if last_error else None,
+    )
 
 def get_ad_entries(sitemap_url, session):
     time.sleep(DELAY_SECONDS)
@@ -56,6 +130,22 @@ def get_ad_entries(sitemap_url, session):
                 formatted_dt = raw_datetime
             entries.append((url, formatted_dt))
     return entries
+
+
+def fetch_ad_entries_with_retry(sitemap_url, session):
+    last_error = None
+    for attempt in range(1, SITEMAP_RETRY_ATTEMPTS + 1):
+        try:
+            return get_ad_entries(sitemap_url, session)
+        except Exception as exc:
+            last_error = exc
+            wait = RETRY_DELAY_SECONDS * attempt
+            print(
+                f"Attempt {attempt}/{SITEMAP_RETRY_ATTEMPTS} failed for {sitemap_url}: {exc}"
+            )
+            time.sleep(wait)
+
+    fail_with_error(FATAL_SITEMAP_MESSAGE, detail=f"{sitemap_url}: {last_error}")
 
 
 def save_links_to_file(links, filename):
@@ -97,39 +187,17 @@ if __name__ == "__main__":
     session = new_scraper_session(verify_ssl=False)
 
     print("Fetching sitemap pages...")
-    try:
-        sitemap_pages = get_sitemap_pages(session)
-    except Exception as e:
-        print(f"Failed to fetch sitemap index: {e}")
-        raise SystemExit(1)
+    sitemap_pages = get_sitemap_pages(session)
 
     print("Scraping ad URLs and formatted dates from sitemaps...")
     all_entries = []
     total = len(sitemap_pages)
-    # Notify backend about total sitemaps
-    try:
-        requests.post(
-            PROGRESS_URL,
-            json={"phase": "1/5 Zber sitemap", "done": 0, "total": total},
-            timeout=3,
-        )
-    except Exception:
-        pass
+    notify_progress(0, total)
 
     for idx, page in enumerate(tqdm(sitemap_pages, bar_format="{n_fmt}/{total_fmt} sitemaps"), 1):
-        try:
-            entries = get_ad_entries(page, session)
-            all_entries.extend(entries)
-        except Exception as e:
-            print(f"Failed to fetch {page}: {e}")
-        try:
-            requests.post(
-                PROGRESS_URL,
-                json={"phase": "1/5 Zber sitemap", "done": idx, "total": total},
-                timeout=3,
-            )
-        except Exception:
-            pass
+        entries = fetch_ad_entries_with_retry(page, session)
+        all_entries.extend(entries)
+        notify_progress(idx, total)
 
     print(f"\nTotal ad entries scraped: {len(all_entries)}")
 

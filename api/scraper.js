@@ -26,10 +26,11 @@ export async function startScrape(filters) {
   });
 }
 
-export async function fetchResults(filters) {
+export async function fetchResults(filters, options = {}) {
+  const { latestOnly = false } = options;
   return apiRequest('/scrape', {
     method: 'POST',
-    body: JSON.stringify({ ...filters, mode: 'old' }),
+    body: JSON.stringify({ ...filters, mode: latestOnly ? 'latest' : 'old' }),
   });
 }
 
