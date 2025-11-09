@@ -17,8 +17,7 @@ export function FiltersDrawer({
   onToggleCategory,
   dateStart,
   dateEnd,
-  onDateStartChange,
-  onDateEndChange,
+  onDateRangeChange,
   onNewOnly,
   newOnly,
   onClose,
@@ -85,8 +84,7 @@ export function FiltersDrawer({
 
   const handleConfirmRange = () => {
     if (!tempStart || !tempEnd) return;
-    onDateStartChange(tempStart);
-    onDateEndChange(tempEnd);
+    onDateRangeChange(tempStart, tempEnd);
     setIsCalendarVisible(false);
   };
 
@@ -95,8 +93,7 @@ export function FiltersDrawer({
   };
 
   const handleClearDates = () => {
-    onDateStartChange(null);
-    onDateEndChange(null);
+    onDateRangeChange(null, null);
     setTempStart(null);
     setTempEnd(null);
   };
