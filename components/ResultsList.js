@@ -1,5 +1,5 @@
 import { View, Text, ScrollView, StyleSheet, Linking, TouchableOpacity } from 'react-native';
-import { External } from 'lucide-react-native';
+import { ExternalLink } from 'lucide-react-native';
 
 export function ResultsList({ items, count, onDownload }) {
   if (!items || items.length === 0) {
@@ -40,7 +40,7 @@ export function ResultsList({ items, count, onDownload }) {
                 </Text>
                 {label && <Text style={styles.meta}>{label}</Text>}
               </View>
-              <External size={16} color="#3b82f6" />
+              <ExternalLink size={16} color="#3b82f6" />
             </TouchableOpacity>
           );
         })}
