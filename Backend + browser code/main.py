@@ -3,7 +3,6 @@ from flask_cors import CORS
 import subprocess
 import os
 from datetime import datetime
-import json
 import traceback
 import logging
 import sys
@@ -548,13 +547,6 @@ def _execute_new_scrape(subcats, date_start, date_end):
     run_step('python "4 - Filter by description.py"', "4/5 – Filtrovanie podľa popisu", progress_url)
     run_step('python "5 - OpenAI filtering.py"', "5/5 – Finálne filtrovanie", progress_url)
 
-    # This code is not used because it is done in 1 - sitemaps
-    # # After phase 1, update old_links in GitHub
-    # with open("Data/acquired_links.txt", encoding="utf-8") as f:
-    #     # Preserve the timestamp portion so future runs can keep history
-    #     current_links = [line.strip() for line in f if line.strip()]
-    # save_old_links(current_links)
-
     new_results = []
     if os.path.exists(PHASE3_FILE):
         with open(PHASE3_FILE, encoding="utf-8") as f:
@@ -616,11 +608,7 @@ def feedback():
     append_keywords(word)
     return "Keyword added", 200
 
-from flask import Response
-import logging
-
-# Suppress Werkzeug logs for /progress
-log = logging.getLogger('werkzeug')
+log = logging.getLogger("werkzeug")
 
 def _progress_payload():
     with progress_lock:
