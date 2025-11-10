@@ -1,4 +1,4 @@
-import { useState, useContext } from 'react';
+import { useContext, useState } from 'react';
 import { View, Text, TextInput, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 import { PrimaryButton } from '../../components/PrimaryButton';
 import { AuthContext } from '../../context/AuthContext';
