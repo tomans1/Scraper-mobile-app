@@ -432,7 +432,7 @@ function formatDisplayDate(value) {
   return `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${year}`;
 }
 
-const WEEK_DAYS = ['Po', 'Ut', 'St', 'St', 'Pi', 'So', 'Ne'];
+const WEEK_DAYS = ['Po', 'Ut', 'St', 'Št', 'Pi', 'So', 'Ne'];
 const MONTH_NAMES = [
   'januar',
   'februar',

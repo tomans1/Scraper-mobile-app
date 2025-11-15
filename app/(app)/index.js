@@ -299,7 +299,7 @@ export default function HomeScreen() {
     if (allResults.length > 0) {
       applyFiltersToResults();
     }
-  }, [selectedCategories, selectedCities, selectedZips]);
+  }, [selectedCategories, selectedCities, selectedZips, dateStart, dateEnd, newOnly]);
 
   const handleNewOnlyToggle = (value) => {
     setNewOnly(value);
@@ -320,7 +320,7 @@ export default function HomeScreen() {
       return { startValue, endValue };
     }
     if (startDate > endDate) {
-      return { startValue, endValue: startValue };
+      return { startValue: endValue, endValue: startValue };
     }
     return { startValue, endValue };
   };
@@ -328,12 +328,16 @@ export default function HomeScreen() {
   const handleDateStartChange = (value) => {
     if (!value) {
       setDateStart(null);
+      setDateEnd(null);
       return;
     }
-    const { startValue, endValue } = ensureOrderedRange(value, dateEnd);
-    setDateStart(startValue);
-    setDateEnd(endValue);
-    applyFiltersToResults();
+    const newStart = value;
+    if (dateEnd && newStart > dateEnd) {
+      setDateStart(newStart);
+      setDateEnd(newStart);
+    } else {
+      setDateStart(newStart);
+    }
   };
 
   const handleDateEndChange = (value) => {
@@ -341,10 +345,13 @@ export default function HomeScreen() {
       setDateEnd(null);
       return;
     }
-    const { startValue, endValue } = ensureOrderedRange(dateStart, value);
-    setDateStart(startValue);
-    setDateEnd(endValue);
-    applyFiltersToResults();
+    const newEnd = value;
+    if (dateStart && newEnd < dateStart) {
+      setDateEnd(newEnd);
+      setDateStart(newEnd);
+    } else {
+      setDateEnd(newEnd);
+    }
   };
 
   return (
