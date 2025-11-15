@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify, make_response, send_from_directory
 from flask_cors import CORS
 import subprocess
 import os
-from datetime import datetime
+from datetime import datetime, date
 import traceback
 import logging
 import sys
@@ -14,6 +14,7 @@ import hmac
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 import time
 from collections import defaultdict
+import re
 try:
     import psutil  # type: ignore
 except Exception:  # pragma: no cover - optional dep
@@ -358,6 +359,7 @@ def parse_result_blocks_text(text):
     block = {}
     for raw in text.splitlines():
         line = raw.strip()
+        line_lower = line.lower()
 
         if line.startswith("URL:"):
             # safer than split()[1]
@@ -375,6 +377,46 @@ def parse_result_blocks_text(text):
             )
             if val is not None:
                 block["subcat"] = val
+
+        elif line_lower.startswith("city:") or line_lower.startswith("mesto:"):
+            val = after_label(
+                line,
+                "City: ",
+                "City:",
+                "city: ",
+                "city:",
+                "CITY: ",
+                "CITY:",
+                "Mesto: ",
+                "Mesto:",
+                "mesto: ",
+                "mesto:",
+                "MESTO: ",
+                "MESTO:",
+            )
+            if val is not None:
+                cleaned = val.strip()
+                block["city"] = "" if cleaned.upper() == "N/A" else cleaned
+
+        elif line_lower.startswith("zip:") or line_lower.startswith("psč:") or line_lower.startswith("psc:"):
+            val = after_label(
+                line,
+                "ZIP: ",
+                "ZIP:",
+                "zip: ",
+                "zip:",
+                "PSČ: ",
+                "PSČ:",
+                "psč: ",
+                "psč:",
+                "psc: ",
+                "psc:",
+                "PSC: ",
+                "PSC:",
+            )
+            if val is not None:
+                cleaned = val.strip()
+                block["zip_code"] = "" if cleaned.upper() == "N/A" else cleaned
 
         elif line.startswith("Timestamp:"):
             _, _, ts = line.partition("Timestamp:")
@@ -410,8 +452,69 @@ def _parse_date(s: str):
     return None
 
 
+def _normalize_result_datetime(value):
+    if not value:
+        return None
+
+    if isinstance(value, datetime):
+        return value
+
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time())
+
+    if isinstance(value, str):
+        parsed_dt = _parse_datetime(value)
+        if parsed_dt:
+            return parsed_dt
+
+        parsed_date = _parse_date(value)
+        if parsed_date:
+            return datetime.combine(parsed_date, datetime.min.time())
+
+    return None
+
+
+def _format_result_date_for_response(value):
+    if not value:
+        return ""
+
+    normalized = _normalize_result_datetime(value)
+    if not normalized:
+        return value if isinstance(value, str) else ""
+
+    has_time = False
+    if isinstance(value, datetime):
+        has_time = True
+    elif isinstance(value, str) and _parse_datetime(value):
+        has_time = True
+    elif normalized.hour or normalized.minute or normalized.second or normalized.microsecond:
+        has_time = True
+
+    return normalized.strftime("%d/%m/%Y %H:%M") if has_time else normalized.strftime("%d/%m/%Y")
+
+
 def _filter_results_by_params(results, subcats, start_date, end_date):
     filtered = []
+
+    # Accept either separate `start_date`/`end_date` or a single combined
+    # range string (e.g. "11/11/2025 - 13/11/2025"). If a combined range
+    # was passed in either parameter, split it into start/end parts so the
+    # subsequent parsing works as expected.
+    if isinstance(start_date, str) and re.search(r'[\-–—]', start_date):
+        parts = re.split(r"\s*[–—-]\s*", start_date)
+        if len(parts) >= 2:
+            start_date = parts[0].strip()
+            end_date = parts[1].strip()
+
+    if isinstance(end_date, str) and re.search(r'[\-–—]', end_date):
+        parts = re.split(r"\s*[–—-]\s*", end_date)
+        if len(parts) >= 2:
+            # If end_date contained a combined range, prefer its parsed
+            # values (but do not overwrite a previously split start_date
+            # unless it's empty).
+            if not start_date:
+                start_date = parts[0].strip()
+            end_date = parts[1].strip()
 
     d1 = _parse_date(start_date) if start_date else None
     d2 = _parse_date(end_date)   if end_date   else None
@@ -419,15 +522,21 @@ def _filter_results_by_params(results, subcats, start_date, end_date):
     for res in results:
         if subcats and res.get("subcat", "").strip() not in subcats:
             continue
-        if d1 and d2:
-            ad_date = res.get("date")
-            if ad_date and not (d1 <= ad_date.date() <= d2):
-                continue
+
+        ad_dt = _normalize_result_datetime(res.get("date"))
+        ad_date = ad_dt.date() if ad_dt else None
+
+        if d1 and ad_date and ad_date < d1:
+            continue
+        if d2 and ad_date and ad_date > d2:
+            continue
 
         filtered.append({
             "url": res.get("url"),
             "subcat": res.get("subcat", ""),
-            "date": res.get("date").strftime("%d/%m/%Y %H:%M") if res.get("date") else "",
+            "date": _format_result_date_for_response(res.get("date")),
+            "city": res.get("city", ""),
+            "zip_code": res.get("zip_code", ""),
         })
 
     return filtered

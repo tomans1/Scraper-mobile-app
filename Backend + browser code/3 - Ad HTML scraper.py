@@ -61,22 +61,52 @@ def scrape_ad_page(url, session):
 
             soup = BeautifulSoup(resp.text, "html.parser")
 
+            # --- Description ---
             description = soup.find("div", class_="popisdetail")
             description = description.get_text(strip=True) if description else "N/A"
 
+            # --- Name + ZIP + City (left side table) ---
             name = "N/A"
-            table = soup.find("td", class_="listadvlevo")
-            if table:
-                inner = table.find("table")
-                if inner:
-                    tds = inner.find_all("td")
-                    if len(tds) > 1:
-                        span = tds[1].find("b")
-                        if span:
-                            inner_span = span.find("span")
-                            if inner_span:
-                                name = inner_span.get_text(strip=True)
+            zip_code = "N/A"
+            city = "N/A"
 
+            left = soup.find("td", class_="listadvlevo")
+            if left:
+                inner = left.find("table")
+                if inner:
+                    rows = inner.find_all("tr")
+                    for tr in rows:
+                        cells = tr.find_all("td")
+                        if len(cells) < 2:
+                            continue
+
+                        label = cells[0].get_text(strip=True).lower()
+
+                        # Meno:
+                        if label.startswith("meno"):
+                            # HTML: <td> Meno: </td><td colspan="2"><b><a>NAME</a></b>...</td>
+                            b_tag = cells[1].find("b")
+                            if b_tag:
+                                name = b_tag.get_text(strip=True)
+
+                        # Lokalita:
+                        if label.startswith("lokalita") and len(cells) >= 3:
+                            # HTML: <td>Lokalita:</td><td><img ...></td><td><a>040 11</a> <a>Košice</a></td>
+                            links = cells[2].find_all("a")
+                            if len(links) >= 2:
+                                first = links[0].get_text(strip=True)
+                                second = links[1].get_text(strip=True)
+
+                                # First is ZIP (starts with digits), second is city
+                                if first and first[0].isdigit():
+                                    zip_code = first
+                                    city = second
+                                else:
+                                    # Fallback if order is ever flipped
+                                    city = first
+                                    zip_code = second
+
+            # --- Breadcrumbs: main & sub category ---
             main_category = sub_category = "N/A"
             drobky = soup.find("div", class_="drobky")
             if drobky:
@@ -90,7 +120,9 @@ def scrape_ad_page(url, session):
                 "description": description,
                 "name": name,
                 "main_category": main_category,
-                "sub_category": sub_category
+                "sub_category": sub_category,
+                "zip_code": zip_code,
+                "city": city,
             }
 
         except Exception as e:
@@ -146,6 +178,8 @@ def main():
                     out.write(f"Description: {result['description']}\n")
                     out.write(f"Main Category: {result['main_category']}\n")
                     out.write(f"Sub Category: {result['sub_category']}\n")
+                    out.write(f"ZIP: {result['zip_code']}\n")
+                    out.write(f"City: {result['city']}\n")
                     out.write("=" * 60 + "\n")
 
                 print(f"Saved result #{valid_count} {url}")

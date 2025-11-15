@@ -18,14 +18,14 @@ export function ServerStatus({ status, onWake }) {
       case 'waking':
         return {
           color: '#3b82f6',
-          label: 'Prebúdzam',
+          label: 'Prebúdzam…',
           showWake: false,
         };
       case 'checking':
       default:
         return {
           color: '#eab308',
-          label: 'Kontrolujem',
+          label: 'Kontrolujem…',
           showWake: false,
         };
     }

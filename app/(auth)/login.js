@@ -1,15 +1,13 @@
-import { useContext, useState } from 'react';
+import { useState, useContext } from 'react';
 import { View, Text, TextInput, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 import { PrimaryButton } from '../../components/PrimaryButton';
 import { AuthContext } from '../../context/AuthContext';
-import { useRouter } from 'expo-router';
 
 export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const { handleLogin } = useContext(AuthContext);
-  const router = useRouter();
 
   async function onLogin() {
     if (!password.trim()) {
@@ -25,10 +23,7 @@ export default function LoginScreen() {
     if (!success) {
       setError('Nesprávne heslo');
       setPassword('');
-      return;
     }
-
-    router.replace('/');
   }
 
   return (

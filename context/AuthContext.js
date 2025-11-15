@@ -22,8 +22,9 @@ export function AuthProvider({ children }) {
       const token = await AsyncStorage.getItem(TOKEN_KEY);
       setAuthToken(token);
       if (token) {
-        const authenticated = await checkAuth({ silent: true });
-        if (!authenticated) {
+        const data = await AuthAPI.checkAuthStatus();
+        setIsAuthenticated(data.authenticated);
+        if (!data.authenticated) {
           await AsyncStorage.removeItem(TOKEN_KEY);
           setAuthToken(null);
         }
@@ -39,12 +40,9 @@ export function AuthProvider({ children }) {
     }
   }
 
-  async function checkAuth(options = {}) {
-    const { silent = false } = options;
+  async function checkAuth() {
     try {
-      if (!silent) {
-        setIsLoading(true);
-      }
+      setIsLoading(true);
       const data = await AuthAPI.checkAuthStatus();
       setIsAuthenticated(data.authenticated);
       if (!data.authenticated) {
@@ -58,9 +56,7 @@ export function AuthProvider({ children }) {
       setAuthToken(null);
       return false;
     } finally {
-      if (!silent) {
-        setIsLoading(false);
-      }
+      setIsLoading(false);
     }
   }
 
@@ -71,20 +67,11 @@ export function AuthProvider({ children }) {
       if (data.token) {
         await AsyncStorage.setItem(TOKEN_KEY, data.token);
         setAuthToken(data.token);
-        setIsAuthenticated(true);
-        const authenticated = await checkAuth({ silent: true });
-        return authenticated;
       }
-
-      await AsyncStorage.removeItem(TOKEN_KEY);
-      setAuthToken(null);
-      setIsAuthenticated(false);
-      return false;
+      const authenticated = await checkAuth();
+      return authenticated;
     } catch (err) {
       setError(err.message || 'Login failed');
-      await AsyncStorage.removeItem(TOKEN_KEY);
-      setAuthToken(null);
-      setIsAuthenticated(false);
       return false;
     }
   }

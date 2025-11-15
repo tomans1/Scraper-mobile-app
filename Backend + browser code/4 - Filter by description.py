@@ -32,14 +32,15 @@ agency_primary, non_sale_primary, filler_words = load_keyword_sets()
 # === Helpers ===
 def extract_blocks(filename):
     blocks = []
+    current = {}
     with open(filename, "r", encoding="utf-8") as f:
-        current = {}
         for line in f:
-            line = line.strip()
-            if line.startswith("Result"):
+            line = line.rstrip("\n")
+            if line.startswith("Result #"):
                 if current:
                     blocks.append(current)
-                current = {"index": line}
+                current = {}
+                current["index"] = line.split("#", 1)[1].strip()
             elif line.startswith("URL:"):
                 current["url"] = line[len("URL:"):].strip()
             elif line.startswith("Name:"):
@@ -50,9 +51,14 @@ def extract_blocks(filename):
                 current["main_category"] = line[len("Main Category:"):].strip()
             elif line.startswith("Sub Category:"):
                 current["sub_category"] = line[len("Sub Category:"):].strip()
+            elif line.startswith("ZIP:"):
+                current["zip_code"] = line[len("ZIP:"):].strip()
+            elif line.startswith("City:"):
+                current["city"] = line[len("City:"):].strip()
         if current:
             blocks.append(current)
     return blocks
+
 
 def normalize(text):
     text = text.lower()
@@ -141,16 +147,21 @@ for idx, ad in enumerate(tqdm(ads, desc="Filtering ads"), 1):
         pass
 
 # === Write filtered ads ===
+# === Write final filtered ads ===
 with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
     for ad in final_ads:
-        f.write(f"{ad['index']}\n")
+        f.write(f"Result #{ad['index']}\n")
         f.write(f"URL: {ad['url']}\n")
         f.write(f"Name: {ad['name']}\n")
         f.write(f"Description: {ad['description']}\n")
         f.write(f"Main Category: {ad['main_category']}\n")
         f.write(f"Sub Category: {ad.get('sub_category', 'N/A')}\n")
-        f.write("="*60 + "\n")
+        f.write(f"ZIP: {ad.get('zip_code', 'N/A')}\n")
+        f.write(f"City: {ad.get('city', 'N/A')}\n")
+        f.write("=" * 60 + "\n")
 
+
+# === Write removed ads with reasons ===
 # === Write removed ads with reasons ===
 with open(REMOVED_FILE, "w", encoding="utf-8") as f:
     for ad in removed_ads:
@@ -160,8 +171,11 @@ with open(REMOVED_FILE, "w", encoding="utf-8") as f:
         f.write(f"Name: {ad['name']}\n")
         f.write(f"Description: {ad['description']}\n")
         f.write(f"Main Category: {ad['main_category']}\n")
-        f.write(f"Sub Category: {ad['sub_category']}\n")
-        f.write("="*60 + "\n")
+        f.write(f"Sub Category: {ad.get('sub_category', 'N/A')}\n")
+        f.write(f"ZIP: {ad.get('zip_code', 'N/A')}\n")
+        f.write(f"City: {ad.get('city', 'N/A')}\n")
+        f.write("=" * 60 + "\n")
+
 
 # === Compute secondary suggestions ===
 secondary_agency_stats = [

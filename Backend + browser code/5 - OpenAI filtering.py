@@ -20,6 +20,7 @@ DATA_DIR = "Data"
 INPUT_FILE = os.path.join(DATA_DIR, "phase2_filtered_links.txt")
 OUTPUT_FILE = os.path.join(DATA_DIR, "phase3_filtered_links.txt")
 REMOVED_FILE = os.path.join(DATA_DIR, "phase3_removed.txt")
+READY_FLAG = os.path.join(DATA_DIR, "phase3_ready.flag")
 # LOG_FILE = os.path.join(DATA_DIR, "gpt_log.txt")
 DEFAULT_PROGRESS_URL = "http://127.0.0.1:5000/progress_update"
 PROGRESS_URL = os.getenv("PROGRESS_URL", DEFAULT_PROGRESS_URL)
@@ -29,6 +30,14 @@ CHUNK_SIZE = 15
 
 #Set your OpenAI API key using the OPENAI_API_KEY environment variable
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+# Remove any leftover completion flag from previous runs
+try:
+    os.remove(READY_FLAG)
+except FileNotFoundError:
+    pass
+except OSError as exc:  # pragma: no cover - best effort cleanup
+    print(f"Warning: unable to clear ready flag: {exc}")
 
 # === HELPER FUNCTIONS ===
 def extract_blocks(filename):
@@ -94,11 +103,11 @@ removed_blocks = {}
 total = len(all_blocks)
 done = 0
 try:
-        requests.post(
-            PROGRESS_URL,
-            json={"phase": "5/5 – Finálne filtrovanie", "done": 0, "total": total},
-            timeout=3,
-        )
+    requests.post(
+        PROGRESS_URL,
+        json={"phase": "5/5 – Finálne filtrovanie", "done": 0, "total": total},
+        timeout=3,
+    )
 except Exception:
     pass
 
@@ -122,11 +131,11 @@ for batch in tqdm(list(batch_blocks(all_blocks, CHUNK_SIZE)), desc="Filtering vi
             kept_blocks.append(block)
     done += len(batch)
     try:
-                requests.post(
-                    PROGRESS_URL,
-                    json={"phase": "5/5 – Finálne filtrovanie", "done": done, "total": total},
-                    timeout=3,
-                )
+        requests.post(
+            PROGRESS_URL,
+            json={"phase": "5/5 – Finálne filtrovanie", "done": done, "total": total},
+            timeout=3,
+        )
     except Exception:
         pass
 
@@ -195,10 +204,17 @@ _append_blocks(REMOVED_FILE, removed_blocks.values(), _format_removed_block)
 
 print(f"\nFiltering complete. Kept: {len(kept_blocks)} | Removed: {len(removed_blocks)}")
 try:
-        requests.post(
-            PROGRESS_URL,
-            json={"phase": "5/5 – Finálne filtrovanie", "done": total, "total": total},
-            timeout=3,
-        )
+    requests.post(
+        PROGRESS_URL,
+        json={"phase": "5/5 – Finálne filtrovanie", "done": total, "total": total},
+        timeout=3,
+    )
 except Exception:
     pass
+
+# Signal to the main process that phase 5 completed successfully
+try:
+    with open(READY_FLAG, "w", encoding="utf-8") as flag:
+        flag.write("ready\n")
+except OSError as exc:
+    print(f"Warning: unable to write ready flag: {exc}")

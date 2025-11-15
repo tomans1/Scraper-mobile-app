@@ -28,5 +28,6 @@ build/
 
 # Scraper output data
 Data/*.txt
+Data/phase3_ready.flag
 
 run.ps1

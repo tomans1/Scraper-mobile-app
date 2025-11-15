@@ -77,8 +77,8 @@
   <div class="bg-white shadow-xl rounded-xl p-8 max-w-2xl w-full">
     <h1 class="text-3xl font-bold text-center mb-4">🔥 Inferno Scraper</h1>
 
-    <button type="button" onclick="toggleAdvancedFilters()"
-            class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-1 px-3 rounded">
+    <button type="button" id="filters-toggle" onclick="toggleAdvancedFilters()"
+            class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-1 px-3 rounded hidden">
       ⚙️ Zobraziť filtre
     </button>
 
@@ -88,15 +88,55 @@
       <!-- subcats -->
       <div>
         <label class="block font-medium mb-1">Podkategórie:</label>
-        <div id="subcat-options" class="grid grid-cols-2 gap-2"></div>
+        <div id="subcat-dropdown" class="relative">
+          <button type="button" id="subcat-dropdown-toggle"
+                  class="w-full border border-gray-300 rounded-lg px-3 py-2 flex items-center justify-between text-left bg-white hover:bg-gray-50">
+            <span id="subcat-dropdown-label" class="truncate">Vyberte podkategórie</span>
+            <span class="ml-2 text-gray-400">▾</span>
+          </button>
+          <div id="subcat-options"
+               class="absolute mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 overflow-y-auto hidden z-20 p-2 space-y-1"></div>
+        </div>
+      </div>
+
+      <!-- cities -->
+      <div>
+        <label class="block font-medium mb-1">Mestá:</label>
+        <div id="city-filter" class="relative">
+          <input id="city-search" type="text" placeholder="Hľadať mesto"
+                 class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                 autocomplete="off">
+          <div id="city-options"
+               class="absolute mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 overflow-y-auto hidden z-20"></div>
+        </div>
+        <p id="city-selection-hint" class="text-xs text-gray-500 mt-1 hidden"></p>
+      </div>
+
+      <!-- zip codes -->
+      <div>
+        <label class="block font-medium mb-1">PSČ:</label>
+        <div id="zip-filter" class="relative">
+          <input id="zip-search" type="text" placeholder="Hľadať PSČ"
+                 class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                 autocomplete="off">
+          <div id="zip-options"
+               class="absolute mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 overflow-y-auto hidden z-20"></div>
+        </div>
+        <p id="zip-selection-hint" class="text-xs text-gray-500 mt-1 hidden"></p>
       </div>
 
       <!-- date -->
       <div class="space-y-2">
         <label class="block font-medium">Dátum:</label>
-        <input id="date-range" class="border border-gray-300 rounded-lg p-2 w-full text-sm" placeholder="Vyberte dátumy" readonly>
+        <div class="flex gap-2">
+          <input id="date-range" class="border border-gray-300 rounded-lg p-2 w-full text-sm" placeholder="Vyberte dátumy" readonly disabled>
+          <button type="button" id="date-apply-btn"
+                  class="px-3 py-2 bg-indigo-500 text-white text-sm rounded-lg hidden disabled:opacity-60 disabled:cursor-not-allowed">
+            Použiť
+          </button>
+        </div>
         <label class="inline-flex items-center mt-2">
-          <input id="new-only" type="checkbox" class="form-checkbox text-red-500 mr-2" onchange="toggleDateInputs(this)">
+          <input id="new-only" type="checkbox" class="form-checkbox text-red-500 mr-2" onchange="toggleDateInputs(this)" disabled>
           Iba nové inzeráty
         </label>
       </div>
@@ -104,11 +144,11 @@
 
     <!-- ---------- ACTIONS ---------- -->
     <div id="start-buttons" class="mt-6 flex justify-center space-x-6">
-      <button type="button" onclick="event.preventDefault(); startProgressPolling(); startScrape('new')"
+      <button type="button" onclick="event.preventDefault(); startScrape('new')"
               class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-6 rounded-lg">
         Spustiť nový zber
       </button>
-      <button type="button" onclick="event.preventDefault(); startProgressPolling(); startScrape('old')"
+      <button type="button" onclick="event.preventDefault(); startScrape('old')"
               class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-6 rounded-lg">
         Zobraziť predchádzajúce výsledky
       </button>
@@ -147,12 +187,12 @@
     <div class="mt-4">
       <button type="button" onclick="document.getElementById('feedback-box').classList.toggle('hidden')"
               class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 px-4 rounded">
-        💬 Pridať kľúčové slovo
+        💬 Pridať agentúru
       </button>
 
       <div id="feedback-box" class="hidden mt-2">
         <textarea rows="2" class="w-full border border-gray-300 rounded-lg p-2"
-                  placeholder="Navrhnite nové kľúčové slovo..."></textarea>
+                  placeholder="Našiel si medzi výdsledkami agentúru? Napíš ju sem (napr. 'inferno')"></textarea>
         <button type="button" onclick="sendFeedback()"
                 class="mt-2 bg-gray-700 hover:bg-gray-800 text-white font-bold py-1 px-4 rounded">
           Odoslať
