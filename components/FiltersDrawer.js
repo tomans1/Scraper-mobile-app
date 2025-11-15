@@ -7,23 +7,33 @@ import {
   Switch,
   Pressable,
   Modal,
+  TextInput,
 } from 'react-native';
 import { PrimaryButton, SecondaryButton } from './PrimaryButton';
+import { ChevronDown } from 'lucide-react-native';
 
 export function FiltersDrawer({
   visible,
-  categories,
+  availableFilters,
   selectedCategories,
+  selectedCities,
+  selectedZips,
   onToggleCategory,
+  onToggleCity,
+  onToggleZip,
   dateStart,
   dateEnd,
   onDateStartChange,
   onDateEndChange,
   onNewOnly,
   newOnly,
+  onApplyFilters,
   onClose,
 }) {
   const [isCalendarVisible, setIsCalendarVisible] = useState(false);
+  const [isSubcatDropdownOpen, setIsSubcatDropdownOpen] = useState(false);
+  const [citySearchTerm, setCitySearchTerm] = useState('');
+  const [zipSearchTerm, setZipSearchTerm] = useState('');
   const [tempStart, setTempStart] = useState(null);
   const [tempEnd, setTempEnd] = useState(null);
   const [currentMonth, setCurrentMonth] = useState(() =>
@@ -39,9 +49,24 @@ export function FiltersDrawer({
     [dateEnd]
   );
 
+  const filteredCities = useMemo(() => {
+    if (!citySearchTerm) return availableFilters.cities;
+    return availableFilters.cities.filter((city) =>
+      city.toLowerCase().includes(citySearchTerm.toLowerCase())
+    );
+  }, [availableFilters.cities, citySearchTerm]);
+
+  const filteredZips = useMemo(() => {
+    if (!zipSearchTerm) return availableFilters.zips;
+    return availableFilters.zips.filter((zip) =>
+      zip.toLowerCase().includes(zipSearchTerm.toLowerCase())
+    );
+  }, [availableFilters.zips, zipSearchTerm]);
+
   useEffect(() => {
     if (!visible) {
       setIsCalendarVisible(false);
+      setIsSubcatDropdownOpen(false);
     }
   }, [visible]);
 
@@ -130,43 +155,120 @@ export function FiltersDrawer({
 
         <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
           <View style={styles.section}>
-            <Text style={styles.label}>Podkategórie:</Text>
-            <View style={styles.categoriesGrid}>
-              {categories.map((cat) => (
+            <Text style={styles.label}>Podkategorie:</Text>
+            <Pressable
+              style={styles.dropdownToggle}
+              onPress={() => setIsSubcatDropdownOpen(!isSubcatDropdownOpen)}
+            >
+              <Text style={styles.dropdownText}>
+                {selectedCategories.length > 0
+                  ? `Vybrane: ${selectedCategories.length}`
+                  : 'Vyberte podkategorie'}
+              </Text>
+              <ChevronDown size={20} color="#6b7280" />
+            </Pressable>
+
+            {isSubcatDropdownOpen && (
+              <View style={styles.dropdownOptions}>
+                <ScrollView style={styles.dropdownScroll} nestedScrollEnabled>
+                  {availableFilters.subcategories.map((cat) => (
+                    <Pressable
+                      key={cat}
+                      style={styles.checkboxRow}
+                      onPress={() => onToggleCategory(cat)}
+                    >
+                      <View style={styles.checkbox}>
+                        {selectedCategories.includes(cat) && (
+                          <View style={styles.checkboxChecked} />
+                        )}
+                      </View>
+                      <Text style={styles.checkboxLabel}>{cat}</Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.label}>Mesta:</Text>
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Hladat mesto..."
+              value={citySearchTerm}
+              onChangeText={setCitySearchTerm}
+            />
+            <ScrollView style={styles.filterList} nestedScrollEnabled>
+              {filteredCities.map((city) => (
                 <Pressable
-                  key={cat}
-                  style={[
-                    styles.categoryItem,
-                    selectedCategories.includes(cat) && styles.categoryItemSelected,
-                  ]}
-                  onPress={() => onToggleCategory(cat)}
+                  key={city}
+                  style={styles.checkboxRow}
+                  onPress={() => onToggleCity(city)}
                 >
-                  <Text
-                    style={[
-                      styles.categoryText,
-                      selectedCategories.includes(cat) && styles.categoryTextSelected,
-                    ]}
-                  >
-                    {cat}
-                  </Text>
+                  <View style={styles.checkbox}>
+                    {selectedCities.includes(city) && (
+                      <View style={styles.checkboxChecked} />
+                    )}
+                  </View>
+                  <Text style={styles.checkboxLabel}>{city}</Text>
                 </Pressable>
               ))}
-            </View>
+            </ScrollView>
+            {selectedCities.length > 0 && (
+              <Text style={styles.selectionHint}>
+                {selectedCities.length === 1
+                  ? 'Vybrana 1 polozka'
+                  : `Vybranych ${selectedCities.length} poloziek`}
+              </Text>
+            )}
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.label}>PSC:</Text>
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Hladat PSC..."
+              value={zipSearchTerm}
+              onChangeText={setZipSearchTerm}
+            />
+            <ScrollView style={styles.filterList} nestedScrollEnabled>
+              {filteredZips.map((zip) => (
+                <Pressable
+                  key={zip}
+                  style={styles.checkboxRow}
+                  onPress={() => onToggleZip(zip)}
+                >
+                  <View style={styles.checkbox}>
+                    {selectedZips.includes(zip) && (
+                      <View style={styles.checkboxChecked} />
+                    )}
+                  </View>
+                  <Text style={styles.checkboxLabel}>{zip}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+            {selectedZips.length > 0 && (
+              <Text style={styles.selectionHint}>
+                {selectedZips.length === 1
+                  ? 'Vybrana 1 polozka'
+                  : `Vybranych ${selectedZips.length} poloziek`}
+              </Text>
+            )}
           </View>
 
           <View style={styles.section}>
             <View style={styles.newOnlyRow}>
-              <Text style={styles.label}>Iba nové inzeráty</Text>
+              <Text style={styles.label}>Iba nove inzeraty</Text>
               <Switch value={newOnly} onValueChange={onNewOnly} />
             </View>
             <Text style={styles.helperText}>
-              Ak je zapnuté, zobrazia sa len najnovšie inzeráty a rozsah dátumov
-              sa nepoužije.
+              Ak je zapnute, zobrazia sa len najnovsie inzeraty a rozsah datumov
+              sa nepouzije.
             </Text>
           </View>
 
           <View style={styles.section}>
-            <Text style={styles.label}>Dátum pridania inzerátu</Text>
+            <Text style={styles.label}>Datum pridania inzeratu</Text>
             <View style={styles.dateInputsRow}>
               <View style={styles.dateInputGroup}>
                 <Text style={styles.dateInputLabel}>Od</Text>
@@ -221,14 +323,14 @@ export function FiltersDrawer({
               <Text
                 style={[styles.clearButtonText, (newOnly || (!dateStart && !dateEnd)) && styles.clearButtonTextDisabled]}
               >
-                Vymazať dátumy
+                Vymazat datumy
               </Text>
             </Pressable>
           </View>
         </ScrollView>
 
         <View style={styles.footer}>
-          <SecondaryButton title="Zavrieť" onPress={onClose} />
+          <SecondaryButton title="Zavriet" onPress={onClose} />
         </View>
       </View>
 
@@ -302,12 +404,12 @@ export function FiltersDrawer({
 
             <View style={styles.calendarActions}>
               <SecondaryButton
-                title="Zrušiť"
+                title="Zrusit"
                 onPress={handleCancelRange}
                 style={styles.calendarActionButton}
               />
               <PrimaryButton
-                title="Potvrdiť"
+                title="Potvrdit"
                 onPress={handleConfirmRange}
                 disabled={!tempStart || !tempEnd}
                 style={[
@@ -330,18 +432,18 @@ function formatDisplayDate(value) {
   return `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${year}`;
 }
 
-const WEEK_DAYS = ['Po', 'Ut', 'St', 'Št', 'Pi', 'So', 'Ne'];
+const WEEK_DAYS = ['Po', 'Ut', 'St', 'St', 'Pi', 'So', 'Ne'];
 const MONTH_NAMES = [
-  'január',
-  'február',
+  'januar',
+  'februar',
   'marec',
-  'apríl',
-  'máj',
-  'jún',
-  'júl',
+  'april',
+  'maj',
+  'jun',
+  'jul',
   'august',
   'september',
-  'október',
+  'oktober',
   'november',
   'december',
 ];
@@ -364,7 +466,7 @@ function formatISODate(date) {
 
 function generateMonthDays(year, month) {
   const firstDay = new Date(year, month, 1);
-  const startOffset = (firstDay.getDay() + 6) % 7; // Monday as first day
+  const startOffset = (firstDay.getDay() + 6) % 7;
   const totalCells = 42;
   const days = [];
   for (let index = 0; index < totalCells; index += 1) {
@@ -453,32 +555,81 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     color: '#1f2937',
   },
-  categoriesGrid: {
+  dropdownToggle: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  categoryItem: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: '#f3f4f6',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    flex: 1,
-    minWidth: '45%',
+    borderColor: '#d1d5db',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: '#fff',
   },
-  categoryItemSelected: {
-    backgroundColor: '#3b82f6',
-    borderColor: '#3b82f6',
-  },
-  categoryText: {
-    fontSize: 13,
+  dropdownText: {
+    fontSize: 14,
     color: '#1f2937',
-    textAlign: 'center',
   },
-  categoryTextSelected: {
-    color: '#fff',
+  dropdownOptions: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    borderRadius: 8,
+    maxHeight: 200,
+    backgroundColor: '#fff',
+  },
+  dropdownScroll: {
+    padding: 8,
+  },
+  searchInput: {
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    backgroundColor: '#fff',
+    marginBottom: 8,
+  },
+  filterList: {
+    maxHeight: 150,
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    borderRadius: 8,
+    padding: 8,
+    backgroundColor: '#f9fafb',
+  },
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderWidth: 2,
+    borderColor: '#3b82f6',
+    borderRadius: 4,
+    marginRight: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxChecked: {
+    width: 12,
+    height: 12,
+    backgroundColor: '#3b82f6',
+    borderRadius: 2,
+  },
+  checkboxLabel: {
+    fontSize: 14,
+    color: '#1f2937',
+    flex: 1,
+  },
+  selectionHint: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginTop: 4,
   },
   newOnlyRow: {
     flexDirection: 'row',

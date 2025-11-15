@@ -27,6 +27,8 @@ export default function HomeScreen() {
 
   const [showFilters, setShowFilters] = useState(false);
   const [selectedCategories, setSelectedCategories] = useState([]);
+  const [selectedCities, setSelectedCities] = useState([]);
+  const [selectedZips, setSelectedZips] = useState([]);
   const [newOnly, setNewOnly] = useState(false);
   const [dateStart, setDateStart] = useState(null);
   const [dateEnd, setDateEnd] = useState(null);
@@ -34,7 +36,14 @@ export default function HomeScreen() {
   const [progress, setProgress] = useState(0);
   const [progressLabel, setProgressLabel] = useState('');
   const [stageLabel, setStageLabel] = useState('');
-  const [results, setResults] = useState([]);
+  const [allResults, setAllResults] = useState([]);
+  const [filteredResults, setFilteredResults] = useState([]);
+  const [availableFilters, setAvailableFilters] = useState({
+    subcategories: [],
+    cities: [],
+    zips: [],
+    dateRange: { min: null, max: null },
+  });
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedbackText, setFeedbackText] = useState('');
   const [serverStatus, setServerStatus] = useState('checking');
@@ -44,9 +53,104 @@ export default function HomeScreen() {
   let statusInterval = null;
 
   const toggleCategory = (cat) => {
-    setSelectedCategories((prev) =>
-      prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]
-    );
+    setSelectedCategories((prev) => {
+      const updated = prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat];
+      return updated;
+    });
+  };
+
+  const toggleCity = (city) => {
+    setSelectedCities((prev) => {
+      const updated = prev.includes(city) ? prev.filter((c) => c !== city) : [...prev, city];
+      return updated;
+    });
+  };
+
+  const toggleZip = (zip) => {
+    setSelectedZips((prev) => {
+      const updated = prev.includes(zip) ? prev.filter((z) => z !== zip) : [...prev, zip];
+      return updated;
+    });
+  };
+
+  const initializeFiltersFromResults = (results) => {
+    if (!Array.isArray(results) || results.length === 0) {
+      setAvailableFilters({
+        subcategories: [],
+        cities: [],
+        zips: [],
+        dateRange: { min: null, max: null },
+      });
+      return;
+    }
+
+    const subcats = new Set();
+    const cities = new Set();
+    const zips = new Set();
+    const dates = [];
+
+    results.forEach((item) => {
+      if (item.subcat) subcats.add(item.subcat);
+      if (item.city && item.city !== 'N/A') cities.add(item.city);
+      if (item.zip_code && item.zip_code !== 'N/A') zips.add(item.zip_code);
+      if (item.date) {
+        const parsed = parseDate(item.date);
+        if (parsed) dates.push(parsed);
+      }
+    });
+
+    const minDate = dates.length > 0 ? new Date(Math.min(...dates)) : null;
+    const maxDate = dates.length > 0 ? new Date(Math.max(...dates)) : null;
+
+    setAvailableFilters({
+      subcategories: Array.from(subcats).sort(),
+      cities: Array.from(cities).sort(),
+      zips: Array.from(zips).sort(),
+      dateRange: { min: minDate, max: maxDate },
+    });
+  };
+
+  const parseDate = (dateStr) => {
+    if (!dateStr) return null;
+    const match = dateStr.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (match) {
+      const [, day, month, year] = match;
+      return new Date(year, month - 1, day).getTime();
+    }
+    return null;
+  };
+
+  const applyFiltersToResults = (results = allResults) => {
+    let filtered = [...results];
+
+    if (selectedCategories.length > 0) {
+      filtered = filtered.filter((item) => selectedCategories.includes(item.subcat));
+    }
+
+    if (selectedCities.length > 0) {
+      filtered = filtered.filter((item) => selectedCities.includes(item.city));
+    }
+
+    if (selectedZips.length > 0) {
+      filtered = filtered.filter((item) => selectedZips.includes(item.zip_code));
+    }
+
+    if (newOnly && availableFilters.dateRange.max) {
+      const maxDate = availableFilters.dateRange.max.getTime();
+      filtered = filtered.filter((item) => {
+        const itemDate = parseDate(item.date);
+        return itemDate === maxDate;
+      });
+    } else if (dateStart && dateEnd) {
+      const startTime = new Date(dateStart).getTime();
+      const endTime = new Date(dateEnd).getTime();
+      filtered = filtered.filter((item) => {
+        const itemDate = parseDate(item.date);
+        return itemDate && itemDate >= startTime && itemDate <= endTime;
+      });
+    }
+
+    setFilteredResults(filtered);
   };
 
   const startProgressPolling = useCallback(() => {
@@ -87,19 +191,24 @@ export default function HomeScreen() {
       setProgress(0);
       setProgressLabel('');
       setStageLabel('');
-      setResults([]);
+      setAllResults([]);
+      setFilteredResults([]);
+      setShowFilters(false);
 
-      const useDateRange = !newOnly && dateStart && dateEnd;
       const filters = {
-        subcategories: selectedCategories,
-        date_start: useDateRange ? dateStart : null,
-        date_end: useDateRange ? dateEnd : null,
         mode: mode,
+        date_start: null,
+        date_end: null,
       };
 
       startProgressPolling();
       const response = await ScraperAPI.startScrape(filters);
-      setResults(response);
+
+      // Store raw results and initialize filters
+      setAllResults(response);
+      initializeFiltersFromResults(response);
+      applyFiltersToResults(response);
+
       setProgress(100);
       setProgressLabel('✅ Hotovo!');
       setIsRunning(false);
@@ -145,7 +254,7 @@ export default function HomeScreen() {
 
   const handleDownload = async () => {
     try {
-      const urls = results.map((it) => it.url || it);
+      const urls = filteredResults.map((it) => it.url || it);
       const text = urls.join('\n');
       await Share.share({
         message: text,
@@ -186,12 +295,19 @@ export default function HomeScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    if (allResults.length > 0) {
+      applyFiltersToResults();
+    }
+  }, [selectedCategories, selectedCities, selectedZips]);
+
   const handleNewOnlyToggle = (value) => {
     setNewOnly(value);
     if (value) {
       setDateStart(null);
       setDateEnd(null);
     }
+    applyFiltersToResults();
   };
 
   const ensureOrderedRange = (startValue, endValue) => {
@@ -217,6 +333,7 @@ export default function HomeScreen() {
     const { startValue, endValue } = ensureOrderedRange(value, dateEnd);
     setDateStart(startValue);
     setDateEnd(endValue);
+    applyFiltersToResults();
   };
 
   const handleDateEndChange = (value) => {
@@ -227,6 +344,7 @@ export default function HomeScreen() {
     const { startValue, endValue } = ensureOrderedRange(dateStart, value);
     setDateStart(startValue);
     setDateEnd(endValue);
+    applyFiltersToResults();
   };
 
   return (
@@ -249,13 +367,15 @@ export default function HomeScreen() {
 
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.card}>
-          <TouchableOpacity
-            style={styles.filterButton}
-            onPress={() => setShowFilters(true)}
-          >
-            <Settings size={16} color="#1f2937" />
-            <Text style={styles.filterButtonText}>Zobraziť filtre</Text>
-          </TouchableOpacity>
+          {allResults.length > 0 && (
+            <TouchableOpacity
+              style={styles.filterButton}
+              onPress={() => setShowFilters(true)}
+            >
+              <Settings size={16} color="#1f2937" />
+              <Text style={styles.filterButtonText}>Zobraziť filtre</Text>
+            </TouchableOpacity>
+          )}
 
           <View style={styles.buttonsGroup}>
             <PrimaryButton
@@ -289,10 +409,10 @@ export default function HomeScreen() {
             />
           )}
 
-          {results.length > 0 && (
+          {filteredResults.length > 0 && (
             <ResultsList
-              items={results}
-              count={results.length}
+              items={filteredResults}
+              count={filteredResults.length}
               onDownload={handleDownload}
             />
           )}
@@ -324,19 +444,26 @@ export default function HomeScreen() {
         </View>
       </ScrollView>
 
-      <FiltersDrawer
-        visible={showFilters}
-        categories={categories}
-        selectedCategories={selectedCategories}
-        onToggleCategory={toggleCategory}
-        dateStart={dateStart}
-        dateEnd={dateEnd}
-        onDateStartChange={handleDateStartChange}
-        onDateEndChange={handleDateEndChange}
-        newOnly={newOnly}
-        onNewOnly={handleNewOnlyToggle}
-        onClose={() => setShowFilters(false)}
-      />
+      {allResults.length > 0 && (
+        <FiltersDrawer
+          visible={showFilters}
+          availableFilters={availableFilters}
+          selectedCategories={selectedCategories}
+          selectedCities={selectedCities}
+          selectedZips={selectedZips}
+          onToggleCategory={toggleCategory}
+          onToggleCity={toggleCity}
+          onToggleZip={toggleZip}
+          dateStart={dateStart}
+          dateEnd={dateEnd}
+          onDateStartChange={handleDateStartChange}
+          onDateEndChange={handleDateEndChange}
+          newOnly={newOnly}
+          onNewOnly={handleNewOnlyToggle}
+          onApplyFilters={() => applyFiltersToResults()}
+          onClose={() => setShowFilters(false)}
+        />
+      )}
     </SafeAreaView>
   );
 }
